@@ -56,8 +56,8 @@ void snd_sound_startup(void)
 
 	sound_on = 1;
 
-	/* Initialize audio subsystem */
-	audio_init(22050, 4);  /* 22050 Hz, 4 buffers */
+	/* Initialize audio subsystem at 44100 Hz to match WAV sample rates */
+	audio_init(44100, 4);
 	mixer_init(SFX_CHANNELS);
 
 	/* Load all sound samples from ROM filesystem */

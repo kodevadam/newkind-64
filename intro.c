@@ -90,7 +90,7 @@ void update_intro1 (void)
 
 	gfx_display_centre_text (310, "Original Game (C) I.Bell & D.Braben.", 120, GFX_COL_WHITE);
 	gfx_display_centre_text (330, "Re-engineered by C.J.Pinder.", 120, GFX_COL_WHITE);
-	gfx_display_centre_text (360, "Load New Commander (A/B)?", 140, GFX_COL_GOLD);
+	gfx_display_centre_text (350, "A=Load Saved Game  B=New Game", 140, GFX_COL_GOLD);
 }
 
 static void next_ship(int bump)
