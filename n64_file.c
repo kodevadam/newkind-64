@@ -20,16 +20,19 @@
 #include "config.h"
 #include "file.h"
 
-/* SRAM base address on N64 */
-#define SRAM_BASE    0x08000000
-#define SAVE_SIZE    256
+/* Save format magic number */
 #define SAVE_MAGIC   0x454C4954  /* "ELIT" */
 
-/* SRAM save slot layout:
+/* EEPROM save layout (fits in 512 bytes = first 64 EEPROM blocks):
  * Offset 0x000: 4-byte magic number
  * Offset 0x004: 256-byte commander data (same format as .nkc files)
- * Offset 0x104: 4-byte checksum of above
  */
+static int eeprom_available = 0;
+
+void n64_save_init(void)
+{
+	eeprom_available = (eeprom_present() == EEPROM_16K || eeprom_present() == EEPROM_4K);
+}
 
 
 /*
@@ -99,25 +102,30 @@ static int read_cfg_line_from_buf(const char *buf, int buflen, int *pos, char *s
  */
 static char *load_rom_file(const char *filename, int *outlen)
 {
-	int fh;
+	FILE *fp;
 	int len;
 	char *buf;
+	char path[128];
 
-	fh = dfs_open(filename);
-	if (fh < 0)
+	snprintf(path, sizeof(path), "rom:/%s", filename);
+	fp = fopen(path, "rb");
+	if (!fp)
 		return NULL;
 
-	len = dfs_size(fh);
+	fseek(fp, 0, SEEK_END);
+	len = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
+
 	buf = (char *)malloc(len + 1);
 	if (!buf)
 	{
-		dfs_close(fh);
+		fclose(fp);
 		return NULL;
 	}
 
-	dfs_read(buf, 1, len, fh);
+	fread(buf, 1, len, fp);
 	buf[len] = '\0';
-	dfs_close(fh);
+	fclose(fp);
 
 	*outlen = len;
 	return buf;
@@ -310,13 +318,26 @@ int save_commander_file(char *path)
 	block[74] = chk ^ 0xA9;
 	block[75] = chk;
 
-	/* Write to SRAM via DMA */
-	/* First write magic, then the 256-byte block */
-	data_cache_hit_writeback_invalidate(&magic, sizeof(magic));
-	dma_write(&magic, SRAM_BASE, sizeof(magic));
+	/* Write to EEPROM: magic (4 bytes) + block (256 bytes) = 260 bytes */
+	if (!eeprom_available)
+		return 1;
 
-	data_cache_hit_writeback_invalidate(block, sizeof(block));
-	dma_write(block, SRAM_BASE + 4, sizeof(block));
+	{
+		uint8_t save_buf[264]; /* 260 rounded up to 8-byte EEPROM block boundary */
+		memset(save_buf, 0, sizeof(save_buf));
+		save_buf[0] = (SAVE_MAGIC >> 24) & 0xFF;
+		save_buf[1] = (SAVE_MAGIC >> 16) & 0xFF;
+		save_buf[2] = (SAVE_MAGIC >> 8) & 0xFF;
+		save_buf[3] = SAVE_MAGIC & 0xFF;
+		memcpy(&save_buf[4], block, 256);
+
+		/* Write in 8-byte blocks (EEPROM block size) */
+		int num_blocks = (260 + 7) / 8;
+		for (int b = 0; b < num_blocks; b++)
+		{
+			eeprom_write(b, &save_buf[b * 8]);
+		}
+	}
 
 	return 0;
 }
@@ -335,16 +356,26 @@ int load_commander_file(char *path)
 
 	(void)path; /* Unused on N64 */
 
-	/* Read magic number from SRAM */
-	dma_read(&magic, SRAM_BASE, sizeof(magic));
-	data_cache_hit_invalidate(&magic, sizeof(magic));
+	if (!eeprom_available)
+		return 1;
 
-	if (magic != SAVE_MAGIC)
-		return 1; /* No save data */
+	/* Read from EEPROM */
+	{
+		uint8_t save_buf[264];
+		int num_blocks = (260 + 7) / 8;
+		for (int b = 0; b < num_blocks; b++)
+		{
+			eeprom_read(b, &save_buf[b * 8]);
+		}
 
-	/* Read commander block from SRAM */
-	dma_read(block, SRAM_BASE + 4, sizeof(block));
-	data_cache_hit_invalidate(block, sizeof(block));
+		magic = ((uint32_t)save_buf[0] << 24) | ((uint32_t)save_buf[1] << 16) |
+		        ((uint32_t)save_buf[2] << 8) | save_buf[3];
+
+		if (magic != SAVE_MAGIC)
+			return 1; /* No save data */
+
+		memcpy(block, &save_buf[4], 256);
+	}
 
 	/* Verify checksum - identical to original */
 	chk = checksum(block);

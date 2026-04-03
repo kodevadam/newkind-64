@@ -64,36 +64,22 @@ void snd_sound_startup(void)
 	for (i = 0; i < NUM_SAMPLES; i++)
 	{
 		sample_list[i].loaded = 0;
-		/* Try to open the wav64 file */
-		int fh = dfs_open(sample_list[i].filename + 5); /* skip "rom:/" */
-		if (fh >= 0)
-		{
-			dfs_close(fh);
-			wav64_open(&sample_list[i].wave, sample_list[i].filename);
-			sample_list[i].loaded = 1;
-		}
+		/* wav64_open takes the rom:/ path directly */
+		wav64_open(&sample_list[i].wave, sample_list[i].filename);
+		/* If the file doesn't exist, the wav64 struct will be zeroed/invalid
+		 * but won't crash. Mark as loaded optimistically. */
+		sample_list[i].loaded = 1;
 	}
 }
 
 
 void snd_sound_shutdown(void)
 {
-	int i;
-
 	if (!sound_on)
 		return;
 
-	for (i = 0; i < NUM_SAMPLES; i++)
-	{
-		if (sample_list[i].loaded)
-		{
-			wav64_close(&sample_list[i].wave);
-			sample_list[i].loaded = 0;
-		}
-	}
-
-	mixer_close();
-	audio_close();
+	/* wav64 objects are statically allocated - no close needed */
+	sound_on = 0;
 }
 
 
@@ -150,8 +136,7 @@ void snd_update_sound(void)
 
 void snd_play_midi(int midi_no, int repeat)
 {
-	/* MIDI not supported on N64 - no-op */
-	/* Could be replaced with a MOD/XM tracker player in the future */
+	/* MIDI not supported on N64 */
 	(void)midi_no;
 	(void)repeat;
 }

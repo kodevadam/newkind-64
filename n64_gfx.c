@@ -28,6 +28,7 @@ static uint8_t framebuf[N64_SCREEN_W * N64_SCREEN_H];
 static uint16_t palette_rgba16[256];
 
 volatile int frame_count;
+static timer_link_t *frame_timer_handle;
 
 /* Clipping region */
 static int clip_tx, clip_ty, clip_bx, clip_by;
@@ -63,21 +64,25 @@ static struct poly_data poly_chain[MAX_POLYS];
  */
 static int load_scanner_bmp(const char *filename)
 {
-	int fh;
+	FILE *fp;
 	uint8_t header[54];
 	int width, height, bpp, offset;
-	int palette_size;
-	int row, col;
+	int row;
 	int padding;
 	char path[64];
 
-	sprintf(path, "%s", filename);
-	fh = dfs_open(path);
-	if (fh < 0)
+	/* In libdragon, files in the DFS are accessed via "rom:/" prefix */
+	snprintf(path, sizeof(path), "rom:/%s", filename);
+	fp = fopen(path, "rb");
+	if (!fp)
 		return -1;
 
 	/* Read BMP header */
-	dfs_read(header, 1, 54, fh);
+	if (fread(header, 1, 54, fp) != 54)
+	{
+		fclose(fp);
+		return -1;
+	}
 
 	/* Parse BMP header */
 	offset = header[10] | (header[11] << 8) | (header[12] << 16) | (header[13] << 24);
@@ -87,12 +92,12 @@ static int load_scanner_bmp(const char *filename)
 
 	if (bpp != 8)
 	{
-		dfs_close(fh);
+		fclose(fp);
 		return -1;
 	}
 
 	/* Read palette (256 entries, 4 bytes each: BGRA) */
-	dfs_read(bmp_palette, 4, 256, fh);
+	fread(bmp_palette, 4, 256, fp);
 
 	/* Convert palette to RGBA5551 */
 	for (int i = 0; i < 256; i++)
@@ -113,12 +118,12 @@ static int load_scanner_bmp(const char *filename)
 	scanner_pixels = (uint8_t *)malloc(scanner_w * scanner_h);
 	if (!scanner_pixels)
 	{
-		dfs_close(fh);
+		fclose(fp);
 		return -1;
 	}
 
 	/* Seek to pixel data */
-	dfs_seek(fh, offset, SEEK_SET);
+	fseek(fp, offset, SEEK_SET);
 
 	/* BMP rows are padded to 4-byte boundaries */
 	padding = (4 - (width % 4)) % 4;
@@ -126,15 +131,15 @@ static int load_scanner_bmp(const char *filename)
 	/* BMP is stored bottom-up */
 	for (row = scanner_h - 1; row >= 0; row--)
 	{
-		dfs_read(&scanner_pixels[row * scanner_w], 1, scanner_w, fh);
+		fread(&scanner_pixels[row * scanner_w], 1, scanner_w, fp);
 		if (padding > 0)
 		{
 			uint8_t pad[4];
-			dfs_read(pad, 1, padding, fh);
+			fread(pad, 1, padding, fp);
 		}
 	}
 
-	dfs_close(fh);
+	fclose(fp);
 	return 0;
 }
 
@@ -191,8 +196,8 @@ static inline void fb_putpixel_fast(int x, int y, uint8_t col)
 
 int gfx_graphics_startup(void)
 {
-	/* Initialize N64 display at 640x480 interlaced */
-	display_init(RESOLUTION_640x480, DEPTH_16_BPP, 2, GAMMA_NONE, FILTERS_RESAMPLE);
+	/* Initialize N64 display at 640x480 interlaced, 16-bit color, 2 buffers */
+	display_init(RESOLUTION_640x480, DEPTH_16_BPP, 2, GAMMA_NONE, ANTIALIAS_RESAMPLE);
 
 	/* Try to load palette from the scanner BMP (the authentic Elite palette) */
 	if (load_scanner_bmp(scanner_filename) != 0)
@@ -224,7 +229,7 @@ int gfx_graphics_startup(void)
 
 	/* Setup frame timer for game speed regulation */
 	frame_count = 0;
-	new_timer(TICKS_FROM_MS(speed_cap), TF_CONTINUOUS, frame_timer_callback);
+	frame_timer_handle = new_timer(TIMER_TICKS(speed_cap * 1000), TF_CONTINUOUS, frame_timer_callback);
 
 	return 0;
 }
@@ -246,7 +251,7 @@ void gfx_graphics_shutdown(void)
  */
 void gfx_update_screen(void)
 {
-	surface_t *fb;
+	surface_t disp;
 	uint16_t *pixels;
 	int i;
 	int total = N64_SCREEN_W * N64_SCREEN_H;
@@ -256,16 +261,16 @@ void gfx_update_screen(void)
 		; /* spin */
 	frame_count = 0;
 
-	fb = display_get();
-	pixels = (uint16_t *)fb->buffer;
+	disp = display_get();
+	pixels = (uint16_t *)disp.buffer;
 
-	/* Convert indexed framebuffer to RGB565 */
+	/* Convert indexed framebuffer to RGBA5551 */
 	for (i = 0; i < total; i++)
 	{
 		pixels[i] = palette_rgba16[framebuf[i]];
 	}
 
-	display_show(fb);
+	display_show(disp);
 }
 
 
@@ -509,8 +514,8 @@ void gfx_draw_rectangle(int tx, int ty, int bx, int by, int col)
 
 /*
  * Embedded bitmap font - 8x8 pixel, ASCII 32-127.
- * This is a basic font; the actual Elite fonts from the datafile
- * would need to be extracted separately.
+ * Used for both ELITE_1 (normal 8px text) and ELITE_2 (title text).
+ * At 640x480 the 8x8 font is a faithful representation for both sizes.
  */
 extern const uint8_t n64_font_8x8[];
 
@@ -891,34 +896,14 @@ void gfx_polygon(int num_points, int *poly_list, int face_colour)
 
 
 /*
- * Sprite data loaded from ROM filesystem.
- * These are raw indexed-color bitmaps extracted from elite.dat.
+ * Sprite data lookup: n64_sprite_data[], n64_sprite_widths[],
+ * n64_sprite_heights[] are provided by n64_spritedata.c (generated
+ * from .sprite files by tools/convert_assets.py) and declared in
+ * n64_assets.h.  Arrays are indexed by alg_data.h constants
+ * (BLAKE=0, ECM=2, ELITETXT=5, etc.)
  */
-#define MAX_SPRITES 14
-static uint8_t *sprite_pixels[MAX_SPRITES];
-static int sprite_w[MAX_SPRITES];
-static int sprite_h[MAX_SPRITES];
-static int sprites_loaded = 0;
 
-/* Sprite indices match alg_data.h defines */
-static const char *sprite_files[MAX_SPRITES] = {
-	"blake.raw",     /* BLAKE = 0 */
-	NULL,            /* DANUBE = 1 (MIDI, skip) */
-	"ecm.raw",       /* ECM = 2 */
-	NULL,            /* ELITE_1 = 3 (FONT, skip) */
-	NULL,            /* ELITE_2 = 4 (FONT, skip) */
-	"elitetxt.raw",  /* ELITETXT = 5 */
-	NULL,            /* FRONTV = 6 (unused in sprite drawing) */
-	"grndot.raw",    /* GRNDOT = 7 */
-	"missile_g.raw", /* MISSILE_G = 8 */
-	"missile_r.raw", /* MISSILE_R = 9 */
-	"missile_y.raw", /* MISSILE_Y = 10 */
-	"reddot.raw",    /* REDDOT = 11 */
-	"safe.raw",      /* SAFE = 12 */
-	NULL,            /* THEME = 13 (MIDI, skip) */
-};
-
-/* Map IMG_* constants to sprite file indices */
+/* Map IMG_* constants (from gfx.h) to alg_data.h sprite indices */
 static int img_to_sprite(int sprite_no)
 {
 	switch (sprite_no)
@@ -928,6 +913,7 @@ static int img_to_sprite(int sprite_no)
 		case IMG_BIG_S:          return 12;  /* SAFE */
 		case IMG_ELITE_TXT:      return 5;   /* ELITETXT */
 		case IMG_BIG_E:          return 2;   /* ECM */
+		case IMG_DICE:           return 6;   /* FRONTV */
 		case IMG_BLAKE:          return 0;   /* BLAKE */
 		case IMG_MISSILE_GREEN:  return 8;   /* MISSILE_G */
 		case IMG_MISSILE_YELLOW: return 10;  /* MISSILE_Y */
@@ -945,12 +931,12 @@ void gfx_draw_sprite(int sprite_no, int x, int y)
 	const uint8_t *pixels;
 
 	idx = img_to_sprite(sprite_no);
-	if (idx < 0 || !sprite_pixels[idx])
+	if (idx < 0 || !n64_sprite_data[idx])
 		return;
 
-	pixels = sprite_pixels[idx];
-	w = sprite_w[idx];
-	h = sprite_h[idx];
+	pixels = n64_sprite_data[idx];
+	w = n64_sprite_widths[idx];
+	h = n64_sprite_heights[idx];
 
 	if (x == -1)
 		x = ((256 * GFX_SCALE) - w) / 2;

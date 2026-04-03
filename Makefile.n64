@@ -5,23 +5,26 @@
 #
 # Prerequisites:
 #   - libdragon SDK installed (https://github.com/DragonMinded/libdragon)
-#   - N64 toolchain (mips64-elf-gcc) in PATH
-#   - audioconv64 tool for wav -> wav64 conversion
+#   - N64 toolchain in PATH (use libdragon's Docker container or native install)
+#   - Set N64_INST environment variable to your libdragon installation path
 #
-# Build:
+# Build with Docker (recommended):
+#   libdragon make -f Makefile.n64
+#
+# Build native:
 #   make -f Makefile.n64
 #
 # Clean:
 #   make -f Makefile.n64 clean
 #
 
+# Include libdragon build system first (provides N64 toolchain vars)
+include $(N64_INST)/include/n64.mk
+
 # ROM name
 ROM_NAME = elite_newkind
-BUILD_DIR = build_n64
 
 # Source files for the N64 build.
-# We use n64_gfx.c, n64_main.c, n64_input.c, n64_sound.c, n64_file.c
-# instead of the Allegro-specific versions.
 SRCS = \
 	n64_main.c \
 	n64_gfx.c \
@@ -29,6 +32,7 @@ SRCS = \
 	n64_sound.c \
 	n64_file.c \
 	n64_font.c \
+	n64_spritedata.c \
 	elite.c \
 	docked.c \
 	intro.c \
@@ -46,16 +50,13 @@ SRCS = \
 	trade.c \
 	vector.c
 
-OBJS = $(SRCS:%.c=$(BUILD_DIR)/%.o)
+OBJS = $(SRCS:%.c=%.o)
 
 # N64 compile flags
-N64_CFLAGS = -DPLATFORM_N64 -I. -O2 -Wall
+CFLAGS += -DPLATFORM_N64 -I. -O2
 
-# Include libdragon build system
-include $(N64_INST)/include/n64.mk
-
-# Filesystem assets to pack into ROM
-FS_DIR = $(BUILD_DIR)/filesystem
+# Filesystem directory for ROM assets
+FS_DIR = filesystem
 
 # WAV files to convert to wav64
 WAV_FILES = launch.wav crash.wav dock.wav gameover.wav pulse.wav hitem.wav \
@@ -64,26 +65,20 @@ WAV_FILES = launch.wav crash.wav dock.wav gameover.wav pulse.wav hitem.wav \
 
 WAV64_FILES = $(WAV_FILES:%.wav=$(FS_DIR)/%.wav64)
 
-# Config and data files to include in ROM filesystem
-FS_DATA_FILES = $(FS_DIR)/newkind.cfg $(FS_DIR)/newscan.cfg $(FS_DIR)/scanner.bmp $(FS_DIR)/elite.dat
+# Data files to include in ROM filesystem
+FS_DATA = $(FS_DIR)/newkind.cfg $(FS_DIR)/newscan.cfg $(FS_DIR)/scanner.bmp
 
 all: $(ROM_NAME).z64
-
-$(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
 
 $(FS_DIR):
 	mkdir -p $(FS_DIR)
 
-# Compile C source files
-$(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
-	$(N64_CC) $(N64_CFLAGS) $(CFLAGS) -c $< -o $@
-
 # Convert WAV files to wav64 format for libdragon
 $(FS_DIR)/%.wav64: %.wav | $(FS_DIR)
-	audioconv64 -o $@ $<
+	@echo "  [WAV64] $<"
+	$(N64_INST)/bin/audioconv64 -o $@ $<
 
-# Copy config/data files to filesystem
+# Copy data files to filesystem staging
 $(FS_DIR)/newkind.cfg: newkind.cfg | $(FS_DIR)
 	cp $< $@
 
@@ -93,34 +88,34 @@ $(FS_DIR)/newscan.cfg: newscan.cfg | $(FS_DIR)
 $(FS_DIR)/scanner.bmp: scanner.bmp | $(FS_DIR)
 	cp $< $@
 
-$(FS_DIR)/elite.dat: elite.dat | $(FS_DIR)
-	cp $< $@
+# Build the DFS filesystem image
+$(ROM_NAME).dfs: $(WAV64_FILES) $(FS_DATA)
+	$(N64_INST)/bin/mkdfs $@ $(FS_DIR)
 
-# Build the DFS (DragonFS) filesystem image
-$(BUILD_DIR)/$(ROM_NAME).dfs: $(WAV64_FILES) $(FS_DATA_FILES)
-	mkdfs $@ $(FS_DIR)
+# Compile C sources (n64.mk provides the rules)
+%.o: %.c
+	@echo "  [CC] $<"
+	$(CC) -c $(CFLAGS) -o $@ $<
 
-# Link the ELF
-$(BUILD_DIR)/$(ROM_NAME).elf: $(OBJS)
-	$(N64_CC) $(N64_LDFLAGS) -o $@ $^ $(N64_LIBS) -ldragon -lm -lc -ldragonsys
+# Link
+$(ROM_NAME).elf: $(OBJS)
+	$(CC) -o $@ $^ $(LDFLAGS) -ldragon -lm -lc -ldragonsys
 
-# Convert ELF to raw binary
-$(BUILD_DIR)/$(ROM_NAME).bin: $(BUILD_DIR)/$(ROM_NAME).elf
-	$(N64_OBJCOPY) -O binary $< $@
-
-# Build final ROM with filesystem appended
-$(ROM_NAME).z64: $(BUILD_DIR)/$(ROM_NAME).bin $(BUILD_DIR)/$(ROM_NAME).dfs
-	@# Create ROM header + code
-	n64tool -l 4M \
+# Create ROM with DFS appended
+$(ROM_NAME).z64: $(ROM_NAME).elf $(ROM_NAME).dfs
+	$(N64_INST)/bin/n64tool \
+		-l 4M \
 		-h $(N64_INST)/mips64-elf/lib/header \
 		-o $@ \
 		-t "Elite - The New Kind" \
-		$(BUILD_DIR)/$(ROM_NAME).bin \
-		-s 1M $(BUILD_DIR)/$(ROM_NAME).dfs
-	@# Fix ROM checksum
-	chksum64 $@
+		$< \
+		-s 1M $(ROM_NAME).dfs
+	$(N64_INST)/bin/chksum64 $@
+	@echo ""
+	@echo "ROM built: $@ ($(shell stat -c%s $@ 2>/dev/null || echo '?') bytes)"
 
 clean:
-	rm -rf $(BUILD_DIR) $(ROM_NAME).z64
+	rm -f $(OBJS) $(ROM_NAME).elf $(ROM_NAME).z64 $(ROM_NAME).dfs
+	rm -rf $(FS_DIR)
 
 .PHONY: all clean

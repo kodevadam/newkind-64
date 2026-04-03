@@ -77,7 +77,7 @@ static void xor_mode(int enable)
 
 void initialise_game(void)
 {
-	set_rand_seed(TICKS_READ());
+	set_rand_seed((int)timer_ticks() & 0x7FFFFFFF);
 	current_screen = SCR_INTRO_ONE;
 
 	restore_saved_commander();
@@ -1256,11 +1256,17 @@ void update_screen(void)
 /*
  * N64 initialization - replaces initialise_allegro()
  */
+/* Declared in n64_file.c */
+extern void n64_save_init(void);
+
 static void initialise_n64(void)
 {
 	/* Initialize libdragon subsystems */
 	timer_init();
 	dfs_init(DFS_DEFAULT_LOCATION);
+
+	/* Initialize EEPROM for save/load */
+	n64_save_init();
 
 	/* Controller init is done in kbd_keyboard_startup() */
 	have_joystick = 1; /* N64 always has a controller */
