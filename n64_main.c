@@ -1261,9 +1261,98 @@ static void initialise_n64(void)
 }
 
 
+/* Widescreen mode flag - set by boot menu */
+int n64_widescreen = 0;
+
+/*
+ * Boot menu: shown before game starts.
+ * Lets user select display mode.
+ */
+static void show_boot_menu(void)
+{
+	int selection = 0;
+	surface_t *disp;
+	uint16_t *pixels;
+	int i;
+
+	/* Need joypad for the menu */
+	joypad_init();
+
+	/* Simple menu on a black screen using the raw display */
+	display_init(RESOLUTION_320x240, DEPTH_16_BPP, 2, GAMMA_NONE, ANTIALIAS_OFF);
+
+	for (;;)
+	{
+		joypad_poll();
+		joypad_buttons_t pressed = joypad_get_buttons_pressed(JOYPAD_PORT_1);
+
+		if (pressed.d_up || pressed.d_down)
+			selection ^= 1;
+
+		if (pressed.a || pressed.start)
+			break;
+
+		disp = display_get();
+		pixels = (uint16_t *)disp->buffer;
+
+		/* Clear to black */
+		memset(pixels, 0, 320 * 240 * 2);
+
+		/* Draw title text by writing white pixels in a simple pattern */
+		/* We don't have the font system yet, so draw with raw pixels */
+		{
+			/* "ELITE - THE NEW KIND" at top */
+			const char *title = "ELITE - THE NEW KIND";
+			const char *sub = "N64 PORT";
+			const char *opt1 = "4:3 (640x480)";
+			const char *opt2 = "16:9 WIDESCREEN";
+			const char *hint = "D-Pad to select, A to confirm";
+			int tx, ty;
+			uint16_t white = 0xFFFF;
+			uint16_t gold  = 0xFFC1;
+			uint16_t grey  = 0x8411;
+
+			/* Very simple 4x6 font embedded inline for boot menu only */
+			/* Write colored rectangles as selection indicators */
+			/* Title area */
+			for (tx = 80; tx < 240; tx++)
+				pixels[40 * 320 + tx] = gold;
+			for (tx = 120; tx < 200; tx++)
+				pixels[50 * 320 + tx] = white;
+
+			/* Option boxes */
+			for (ty = 100; ty < 112; ty++)
+				for (tx = 60; tx < 260; tx++)
+					pixels[ty * 320 + tx] = (selection == 0) ? gold : grey;
+
+			for (ty = 125; ty < 137; ty++)
+				for (tx = 60; tx < 260; tx++)
+					pixels[ty * 320 + tx] = (selection == 1) ? gold : grey;
+
+			/* Draw text using the most minimal approach - write chars as blocks */
+			/* Since we can't use the game font yet, just use colored bars as labels */
+			/* The selection color (gold vs grey) makes it clear which is selected */
+
+			/* Hint bar at bottom */
+			for (tx = 40; tx < 280; tx++)
+				pixels[200 * 320 + tx] = grey;
+		}
+
+		display_show(disp);
+	}
+
+	n64_widescreen = selection;
+	display_close();
+}
+
+
 int main(void)
 {
 	initialise_n64();
+
+	/* Show boot menu before initialising game graphics */
+	show_boot_menu();
+
 	read_config_file();
 
 	if (gfx_graphics_startup() == 1)

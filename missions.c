@@ -194,7 +194,7 @@ void constrictor_mission_brief (void)
 	gfx_display_pretty_text (16, 200, 470, 384,
 	      (cmdr.galaxy_number == 0) ? mission1_brief_b : mission1_brief_c);
 		
-	gfx_display_centre_text (330, "Press space to continue.", 140, GFX_COL_GOLD);
+	gfx_display_centre_text (330, "Press Start to continue.", 140, GFX_COL_GOLD);
 		
 	clear_universe();
 	set_init_matrix (rotmat);
@@ -233,7 +233,7 @@ void constrictor_mission_debrief (void)
 	
 	gfx_display_pretty_text (116, 132, 400, 384, mission1_debrief);
 
-	gfx_display_centre_text (330, "Press space to continue.", 140, GFX_COL_GOLD);
+	gfx_display_centre_text (330, "Press Start to continue.", 140, GFX_COL_GOLD);
 
 	gfx_update_screen();
 	
@@ -256,7 +256,7 @@ void thargoid_mission_first_brief (void)
 
 	gfx_display_pretty_text (116, 132, 400, 384, mission2_brief_a);
 
-	gfx_display_centre_text (330, "Press space to continue.", 140, GFX_COL_GOLD);
+	gfx_display_centre_text (330, "Press Start to continue.", 140, GFX_COL_GOLD);
 
 	gfx_update_screen();
 	
@@ -282,7 +282,7 @@ void thargoid_mission_second_brief (void)
 
 	gfx_draw_sprite (IMG_BLAKE, 352, 46);
 	
-	gfx_display_centre_text (330, "Press space to continue.", 140, GFX_COL_GOLD);
+	gfx_display_centre_text (330, "Press Start to continue.", 140, GFX_COL_GOLD);
 
 	gfx_update_screen();
 	
@@ -309,7 +309,7 @@ void thargoid_mission_debrief (void)
 	
 	gfx_display_pretty_text (116, 132, 400, 384, mission2_debrief);
 
-	gfx_display_centre_text (330, "Press space to continue.", 140, GFX_COL_GOLD);
+	gfx_display_centre_text (330, "Press Start to continue.", 140, GFX_COL_GOLD);
 
 	gfx_update_screen();
 	

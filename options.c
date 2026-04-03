@@ -76,7 +76,7 @@ void quit_screen (void)
 	gfx_display_centre_text (10, "GAME OPTIONS", 140, GFX_COL_GOLD);
 	gfx_draw_line (0, 36, 511, 36);
 
-	gfx_display_centre_text (175, "QUIT GAME (Y/N)?", 140, GFX_COL_GOLD);		
+	gfx_display_centre_text (175, "QUIT GAME? (A=Yes, B=No)", 140, GFX_COL_GOLD);		
 }
 
 
@@ -88,7 +88,7 @@ void restart_screen(void)
 	gfx_display_centre_text (10, "GAME OPTIONS", 140, GFX_COL_GOLD);
 	gfx_draw_line (0, 36, 511, 36);
 
-	gfx_display_centre_text (175, "RESTART GAME (Y/N)?", 140, GFX_COL_GOLD);		
+	gfx_display_centre_text (175, "RESTART GAME? (A=Yes, B=No)", 140, GFX_COL_GOLD);		
 }  
 
 

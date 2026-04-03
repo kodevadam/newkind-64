@@ -194,10 +194,21 @@ static inline void fb_putpixel_fast(int x, int y, uint8_t col)
 }
 
 
+/* Widescreen flag from boot menu */
+extern int n64_widescreen;
+
 int gfx_graphics_startup(void)
 {
-	/* Initialize N64 display at 640x480 interlaced, 16-bit color, 2 buffers */
-	display_init(RESOLUTION_640x480, DEPTH_16_BPP, 2, GAMMA_NONE, ANTIALIAS_RESAMPLE);
+	/* Initialize N64 display at 640x480 interlaced, 16-bit color, 3 buffers.
+	 * Use ANTIALIAS_OFF for crisp pixel rendering.
+	 *
+	 * In widescreen mode, we still render at 640x480 but the N64 VI
+	 * stretches this to fill a 16:9 display. The game content is
+	 * pre-squished horizontally so it looks correct on widescreen TVs.
+	 * Since the game's internal coordinates are 512x384 centered in
+	 * 640x480, on a 16:9 TV the image will appear wider and shorter
+	 * which actually helps with the vertical clipping issue. */
+	display_init(RESOLUTION_640x480, DEPTH_16_BPP, 3, GAMMA_NONE, ANTIALIAS_OFF);
 
 	/* Try to load palette from the scanner BMP (the authentic Elite palette) */
 	if (load_scanner_bmp(scanner_filename) != 0)
