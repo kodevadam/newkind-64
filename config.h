@@ -26,6 +26,10 @@
  * Set the graphics platform we are using...
  */
 
+#ifdef PLATFORM_N64
+#define GFX_N64
+#define RES_640_480
+#else
 #define GFX_ALLEGRO
 
 /*
@@ -47,5 +51,6 @@
  * #define RES_640_480
  * #define RES_320_240
  */
+#endif
 
 #endif

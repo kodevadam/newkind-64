@@ -1,0 +1,978 @@
+/**
+ *
+ * Elite - The New Kind.
+ *
+ * Nintendo 64 version of Graphics routines using libdragon.
+ *
+ * N64 port: Software-rendered framebuffer at 640x480 (interlaced).
+ * Based on the Allegro backend (alg_gfx.c) by C.J.Pinder.
+ *
+ **/
+
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <math.h>
+
+#include <libdragon.h>
+
+#include "config.h"
+#include "gfx.h"
+#include "elite.h"
+#include "n64_assets.h"
+
+/* Back-buffer: 8-bit indexed color just like the Allegro version */
+static uint8_t framebuf[N64_SCREEN_W * N64_SCREEN_H];
+
+/* The 256-color palette, stored as RGBA5551 for the N64 framebuffer */
+static uint16_t palette_rgba16[256];
+
+volatile int frame_count;
+
+/* Clipping region */
+static int clip_tx, clip_ty, clip_bx, clip_by;
+
+/* Scanner image data - loaded from ROM filesystem (BMP converted to raw) */
+static uint8_t *scanner_pixels;  /* indexed color pixel data */
+static int scanner_w, scanner_h;
+
+/* Palette loaded from scanner BMP */
+static uint8_t bmp_palette[256][4]; /* RGBX */
+
+#define MAX_POLYS	100
+
+static int start_poly;
+static int total_polys;
+
+struct poly_data
+{
+	int z;
+	int no_points;
+	int face_colour;
+	int point_list[16];
+	int next;
+};
+
+static struct poly_data poly_chain[MAX_POLYS];
+
+
+/*
+ * Load the scanner BMP from ROM filesystem and extract its palette.
+ * The BMP is an 8-bit indexed color image (256 colors).
+ * This gives us the authentic Elite palette used by all game graphics.
+ */
+static int load_scanner_bmp(const char *filename)
+{
+	int fh;
+	uint8_t header[54];
+	int width, height, bpp, offset;
+	int palette_size;
+	int row, col;
+	int padding;
+	char path[64];
+
+	sprintf(path, "%s", filename);
+	fh = dfs_open(path);
+	if (fh < 0)
+		return -1;
+
+	/* Read BMP header */
+	dfs_read(header, 1, 54, fh);
+
+	/* Parse BMP header */
+	offset = header[10] | (header[11] << 8) | (header[12] << 16) | (header[13] << 24);
+	width = header[18] | (header[19] << 8) | (header[20] << 16) | (header[21] << 24);
+	height = header[22] | (header[23] << 8) | (header[24] << 16) | (header[25] << 24);
+	bpp = header[28] | (header[29] << 8);
+
+	if (bpp != 8)
+	{
+		dfs_close(fh);
+		return -1;
+	}
+
+	/* Read palette (256 entries, 4 bytes each: BGRA) */
+	dfs_read(bmp_palette, 4, 256, fh);
+
+	/* Convert palette to RGBA5551 */
+	for (int i = 0; i < 256; i++)
+	{
+		int b = bmp_palette[i][0];
+		int g = bmp_palette[i][1];
+		int r = bmp_palette[i][2];
+		int r5 = (r >> 3) & 0x1F;
+		int g5 = (g >> 3) & 0x1F;
+		int b5 = (b >> 3) & 0x1F;
+		/* RGBA5551: RRRRR GGGGG BBBBB A */
+		palette_rgba16[i] = (r5 << 11) | (g5 << 6) | (b5 << 1) | (i ? 1 : 0);
+	}
+
+	/* Allocate pixel data */
+	scanner_w = width;
+	scanner_h = abs(height);
+	scanner_pixels = (uint8_t *)malloc(scanner_w * scanner_h);
+	if (!scanner_pixels)
+	{
+		dfs_close(fh);
+		return -1;
+	}
+
+	/* Seek to pixel data */
+	dfs_seek(fh, offset, SEEK_SET);
+
+	/* BMP rows are padded to 4-byte boundaries */
+	padding = (4 - (width % 4)) % 4;
+
+	/* BMP is stored bottom-up */
+	for (row = scanner_h - 1; row >= 0; row--)
+	{
+		dfs_read(&scanner_pixels[row * scanner_w], 1, scanner_w, fh);
+		if (padding > 0)
+		{
+			uint8_t pad[4];
+			dfs_read(pad, 1, padding, fh);
+		}
+	}
+
+	dfs_close(fh);
+	return 0;
+}
+
+
+static void init_default_palette(void)
+{
+	/* Fallback palette if BMP load fails - matches Elite's color scheme */
+	memset(palette_rgba16, 0, sizeof(palette_rgba16));
+
+	palette_rgba16[0]   = 0x0001;  /* Black (with alpha) - actually use 0 for transparent */
+	palette_rgba16[0]   = 0x0000;  /* Black */
+	palette_rgba16[1]   = (0x15 << 11) | (0x00 << 6) | (0x00 << 1) | 1; /* dark red */
+	palette_rgba16[2]   = (0x00 << 11) | (0x1F << 6) | (0x00 << 1) | 1; /* green */
+	palette_rgba16[4]   = (0x00 << 11) | (0x00 << 6) | (0x1F << 1) | 1; /* blue */
+	palette_rgba16[11]  = (0x00 << 11) | (0x1F << 6) | (0x1F << 1) | 1; /* cyan */
+	palette_rgba16[28]  = (0x18 << 11) | (0x00 << 6) | (0x00 << 1) | 1; /* dark red */
+	palette_rgba16[39]  = (0x1F << 11) | (0x18 << 6) | (0x00 << 1) | 1; /* gold */
+	palette_rgba16[49]  = (0x1F << 11) | (0x00 << 6) | (0x00 << 1) | 1; /* red */
+	palette_rgba16[234] = (0x0D << 11) | (0x0D << 6) | (0x0D << 1) | 1; /* grey */
+	palette_rgba16[235] = (0x10 << 11) | (0x10 << 6) | (0x10 << 1) | 1; /* grey */
+	palette_rgba16[237] = (0x13 << 11) | (0x13 << 6) | (0x13 << 1) | 1; /* grey */
+	palette_rgba16[248] = (0x09 << 11) | (0x09 << 6) | (0x09 << 1) | 1; /* grey */
+	palette_rgba16[255] = (0x1F << 11) | (0x1F << 6) | (0x1F << 1) | 1; /* white */
+
+	/* AA grey ramp */
+	for (int i = 0; i < 8; i++)
+	{
+		int v = (i * 31) / 7;
+		palette_rgba16[235 + i] = (v << 11) | (v << 6) | (v << 1) | 1;
+	}
+}
+
+
+static void frame_timer_callback(int ovfl)
+{
+	frame_count++;
+}
+
+
+/* Inline pixel set with bounds checking and clipping */
+static inline void fb_putpixel(int x, int y, uint8_t col)
+{
+	if (x >= clip_tx && x <= clip_bx && y >= clip_ty && y <= clip_by)
+		framebuf[y * N64_SCREEN_W + x] = col;
+}
+
+/* Fast pixel set without clipping (for internal use) */
+static inline void fb_putpixel_fast(int x, int y, uint8_t col)
+{
+	if (x >= 0 && x < N64_SCREEN_W && y >= 0 && y < N64_SCREEN_H)
+		framebuf[y * N64_SCREEN_W + x] = col;
+}
+
+
+int gfx_graphics_startup(void)
+{
+	/* Initialize N64 display at 640x480 interlaced */
+	display_init(RESOLUTION_640x480, DEPTH_16_BPP, 2, GAMMA_NONE, FILTERS_RESAMPLE);
+
+	/* Try to load palette from the scanner BMP (the authentic Elite palette) */
+	if (load_scanner_bmp(scanner_filename) != 0)
+	{
+		/* Fallback: try default name */
+		if (load_scanner_bmp("scanner.bmp") != 0)
+		{
+			/* Use built-in default palette */
+			init_default_palette();
+		}
+	}
+
+	/* Clear framebuffer */
+	memset(framebuf, 0, sizeof(framebuf));
+
+	/* Set default clip region to full screen */
+	clip_tx = 0;
+	clip_ty = 0;
+	clip_bx = N64_SCREEN_W - 1;
+	clip_by = N64_SCREEN_H - 1;
+
+	/* Draw initial scanner from the loaded BMP */
+	gfx_draw_scanner();
+
+	/* Draw border lines around the view area (faithful to original) */
+	gfx_draw_line(0, 0, 0, 384);
+	gfx_draw_line(0, 0, 511, 0);
+	gfx_draw_line(511, 0, 511, 384);
+
+	/* Setup frame timer for game speed regulation */
+	frame_count = 0;
+	new_timer(TICKS_FROM_MS(speed_cap), TF_CONTINUOUS, frame_timer_callback);
+
+	return 0;
+}
+
+
+void gfx_graphics_shutdown(void)
+{
+	if (scanner_pixels)
+	{
+		free(scanner_pixels);
+		scanner_pixels = NULL;
+	}
+	display_close();
+}
+
+
+/*
+ * Blit the 8-bit indexed framebuffer to the N64 16-bit display.
+ */
+void gfx_update_screen(void)
+{
+	surface_t *fb;
+	uint16_t *pixels;
+	int i;
+	int total = N64_SCREEN_W * N64_SCREEN_H;
+
+	/* Wait for frame timing */
+	while (frame_count < 1)
+		; /* spin */
+	frame_count = 0;
+
+	fb = display_get();
+	pixels = (uint16_t *)fb->buffer;
+
+	/* Convert indexed framebuffer to RGB565 */
+	for (i = 0; i < total; i++)
+	{
+		pixels[i] = palette_rgba16[framebuf[i]];
+	}
+
+	display_show(fb);
+}
+
+
+void gfx_acquire_screen(void)
+{
+	/* No-op on N64 - we render to our own buffer */
+}
+
+
+void gfx_release_screen(void)
+{
+	/* No-op on N64 */
+}
+
+
+void gfx_fast_plot_pixel(int x, int y, int col)
+{
+	fb_putpixel_fast(x, y, col);
+}
+
+
+void gfx_plot_pixel(int x, int y, int col)
+{
+	fb_putpixel(x + GFX_X_OFFSET, y + GFX_Y_OFFSET, col);
+}
+
+
+void gfx_draw_filled_circle(int cx, int cy, int radius, int circle_colour)
+{
+	int x, y;
+	int px, py;
+
+	cx += GFX_X_OFFSET;
+	cy += GFX_Y_OFFSET;
+
+	for (y = -radius; y <= radius; y++)
+	{
+		for (x = -radius; x <= radius; x++)
+		{
+			if (x * x + y * y <= radius * radius)
+			{
+				px = cx + x;
+				py = cy + y;
+				fb_putpixel(px, py, circle_colour);
+			}
+		}
+	}
+}
+
+
+/* Bresenham circle */
+void gfx_draw_circle(int cx, int cy, int radius, int circle_colour)
+{
+	int x = 0, y = radius;
+	int d = 3 - 2 * radius;
+
+	cx += GFX_X_OFFSET;
+	cy += GFX_Y_OFFSET;
+
+	while (y >= x)
+	{
+		fb_putpixel(cx + x, cy + y, circle_colour);
+		fb_putpixel(cx - x, cy + y, circle_colour);
+		fb_putpixel(cx + x, cy - y, circle_colour);
+		fb_putpixel(cx - x, cy - y, circle_colour);
+		fb_putpixel(cx + y, cy + x, circle_colour);
+		fb_putpixel(cx - y, cy + x, circle_colour);
+		fb_putpixel(cx + y, cy - x, circle_colour);
+		fb_putpixel(cx - y, cy - x, circle_colour);
+
+		x++;
+		if (d > 0)
+		{
+			y--;
+			d = d + 4 * (x - y) + 10;
+		}
+		else
+		{
+			d = d + 4 * x + 6;
+		}
+	}
+}
+
+
+/* Bresenham line drawing */
+static void draw_line_clipped(int x1, int y1, int x2, int y2, uint8_t col)
+{
+	int dx = abs(x2 - x1);
+	int dy = abs(y2 - y1);
+	int sx = (x1 < x2) ? 1 : -1;
+	int sy = (y1 < y2) ? 1 : -1;
+	int err = dx - dy;
+	int e2;
+
+	for (;;)
+	{
+		fb_putpixel(x1, y1, col);
+		if (x1 == x2 && y1 == y2)
+			break;
+		e2 = 2 * err;
+		if (e2 > -dy)
+		{
+			err -= dy;
+			x1 += sx;
+		}
+		if (e2 < dx)
+		{
+			err += dx;
+			y1 += sy;
+		}
+	}
+}
+
+
+/* Horizontal line - optimized */
+static void draw_hline(int x1, int x2, int y, uint8_t col)
+{
+	int tmp;
+	if (x1 > x2) { tmp = x1; x1 = x2; x2 = tmp; }
+	if (y < clip_ty || y > clip_by) return;
+	if (x1 < clip_tx) x1 = clip_tx;
+	if (x2 > clip_bx) x2 = clip_bx;
+	if (x1 > x2) return;
+	memset(&framebuf[y * N64_SCREEN_W + x1], col, x2 - x1 + 1);
+}
+
+
+/* Vertical line - optimized */
+static void draw_vline(int x, int y1, int y2, uint8_t col)
+{
+	int tmp;
+	if (y1 > y2) { tmp = y1; y1 = y2; y2 = tmp; }
+	if (x < clip_tx || x > clip_bx) return;
+	if (y1 < clip_ty) y1 = clip_ty;
+	if (y2 > clip_by) y2 = clip_by;
+	for (; y1 <= y2; y1++)
+		framebuf[y1 * N64_SCREEN_W + x] = col;
+}
+
+
+void gfx_draw_line(int x1, int y1, int x2, int y2)
+{
+	x1 += GFX_X_OFFSET;
+	y1 += GFX_Y_OFFSET;
+	x2 += GFX_X_OFFSET;
+	y2 += GFX_Y_OFFSET;
+
+	if (y1 == y2)
+	{
+		draw_hline(x1, x2, y1, GFX_COL_WHITE);
+		return;
+	}
+	if (x1 == x2)
+	{
+		draw_vline(x1, y1, y2, GFX_COL_WHITE);
+		return;
+	}
+
+	draw_line_clipped(x1, y1, x2, y2, GFX_COL_WHITE);
+}
+
+
+void gfx_draw_colour_line(int x1, int y1, int x2, int y2, int line_colour)
+{
+	x1 += GFX_X_OFFSET;
+	y1 += GFX_Y_OFFSET;
+	x2 += GFX_X_OFFSET;
+	y2 += GFX_Y_OFFSET;
+
+	if (y1 == y2)
+	{
+		draw_hline(x1, x2, y1, line_colour);
+		return;
+	}
+	if (x1 == x2)
+	{
+		draw_vline(x1, y1, y2, line_colour);
+		return;
+	}
+
+	draw_line_clipped(x1, y1, x2, y2, line_colour);
+}
+
+
+/* Software triangle fill using scanline */
+void gfx_draw_triangle(int x1, int y1, int x2, int y2, int x3, int y3, int col)
+{
+	int tmp;
+	int y;
+
+	x1 += GFX_X_OFFSET; y1 += GFX_Y_OFFSET;
+	x2 += GFX_X_OFFSET; y2 += GFX_Y_OFFSET;
+	x3 += GFX_X_OFFSET; y3 += GFX_Y_OFFSET;
+
+	/* Sort vertices by y */
+	if (y1 > y2) { tmp=x1; x1=x2; x2=tmp; tmp=y1; y1=y2; y2=tmp; }
+	if (y1 > y3) { tmp=x1; x1=x3; x3=tmp; tmp=y1; y1=y3; y3=tmp; }
+	if (y2 > y3) { tmp=x2; x2=x3; x3=tmp; tmp=y2; y2=y3; y3=tmp; }
+
+	if (y3 == y1) {
+		int minx = x1 < x2 ? (x1 < x3 ? x1 : x3) : (x2 < x3 ? x2 : x3);
+		int maxx = x1 > x2 ? (x1 > x3 ? x1 : x3) : (x2 > x3 ? x2 : x3);
+		draw_hline(minx, maxx, y1, col);
+		return;
+	}
+
+	for (y = y1; y <= y3; y++)
+	{
+		int xa, xb;
+		/* Edge from (x1,y1) to (x3,y3) is always active */
+		xa = x1 + (x3 - x1) * (y - y1) / (y3 - y1);
+
+		if (y < y2)
+		{
+			if (y2 == y1) xb = x1;
+			else xb = x1 + (x2 - x1) * (y - y1) / (y2 - y1);
+		}
+		else
+		{
+			if (y3 == y2) xb = x2;
+			else xb = x2 + (x3 - x2) * (y - y2) / (y3 - y2);
+		}
+
+		draw_hline(xa, xb, y, col);
+	}
+}
+
+
+void gfx_draw_rectangle(int tx, int ty, int bx, int by, int col)
+{
+	int y;
+	tx += GFX_X_OFFSET;
+	ty += GFX_Y_OFFSET;
+	bx += GFX_X_OFFSET;
+	by += GFX_Y_OFFSET;
+
+	for (y = ty; y <= by; y++)
+		draw_hline(tx, bx, y, col);
+}
+
+
+/*
+ * Embedded bitmap font - 8x8 pixel, ASCII 32-127.
+ * This is a basic font; the actual Elite fonts from the datafile
+ * would need to be extracted separately.
+ */
+extern const uint8_t n64_font_8x8[];
+
+static void draw_char(int x, int y, char ch, int col)
+{
+	int cx, cy;
+	const uint8_t *glyph;
+	int idx = (unsigned char)ch;
+
+	if (idx < 32 || idx > 127) return;
+	glyph = &n64_font_8x8[(idx - 32) * 8];
+
+	for (cy = 0; cy < 8; cy++)
+	{
+		uint8_t row = glyph[cy];
+		for (cx = 0; cx < 8; cx++)
+		{
+			if (row & (0x80 >> cx))
+				fb_putpixel(x + cx, y + cy, col);
+		}
+	}
+}
+
+
+void gfx_display_text(int x, int y, char *txt)
+{
+	int px = (x / (2 / GFX_SCALE)) + GFX_X_OFFSET;
+	int py = (y / (2 / GFX_SCALE)) + GFX_Y_OFFSET;
+
+	while (*txt)
+	{
+		draw_char(px, py, *txt, GFX_COL_WHITE);
+		px += 8;
+		txt++;
+	}
+}
+
+
+void gfx_display_colour_text(int x, int y, char *txt, int col)
+{
+	int px = (x / (2 / GFX_SCALE)) + GFX_X_OFFSET;
+	int py = (y / (2 / GFX_SCALE)) + GFX_Y_OFFSET;
+
+	while (*txt)
+	{
+		draw_char(px, py, *txt, col);
+		px += 8;
+		txt++;
+	}
+}
+
+
+void gfx_display_centre_text(int y, char *str, int psize, int col)
+{
+	int len = strlen(str);
+	int txt_colour = col;
+	int py = (y / (2 / GFX_SCALE)) + GFX_Y_OFFSET;
+	int px;
+
+	/* psize 140 = large title font; use same font but different color */
+	if (psize == 140)
+		txt_colour = GFX_COL_GOLD;
+
+	px = (128 * GFX_SCALE) + GFX_X_OFFSET - (len * 4);
+
+	while (*str)
+	{
+		draw_char(px, py, *str, txt_colour);
+		px += 8;
+		str++;
+	}
+}
+
+
+void gfx_clear_display(void)
+{
+	int y;
+	for (y = GFX_Y_OFFSET + 1; y <= 383 + GFX_Y_OFFSET; y++)
+		memset(&framebuf[y * N64_SCREEN_W + GFX_X_OFFSET + 1], GFX_COL_BLACK,
+		       510);
+}
+
+void gfx_clear_text_area(void)
+{
+	int y;
+	for (y = GFX_Y_OFFSET + 340; y <= 383 + GFX_Y_OFFSET; y++)
+		memset(&framebuf[y * N64_SCREEN_W + GFX_X_OFFSET + 1], GFX_COL_BLACK,
+		       510);
+}
+
+
+void gfx_clear_area(int tx, int ty, int bx, int by)
+{
+	int y;
+	tx += GFX_X_OFFSET;
+	ty += GFX_Y_OFFSET;
+	bx += GFX_X_OFFSET;
+	by += GFX_Y_OFFSET;
+
+	if (tx < 0) tx = 0;
+	if (ty < 0) ty = 0;
+	if (bx >= N64_SCREEN_W) bx = N64_SCREEN_W - 1;
+	if (by >= N64_SCREEN_H) by = N64_SCREEN_H - 1;
+
+	for (y = ty; y <= by; y++)
+		memset(&framebuf[y * N64_SCREEN_W + tx], GFX_COL_BLACK, bx - tx + 1);
+}
+
+
+void gfx_display_pretty_text(int tx, int ty, int bx, int by, char *txt)
+{
+	char strbuf[100];
+	char *str;
+	char *bptr;
+	int len;
+	int pos;
+	int maxlen;
+
+	maxlen = (bx - tx) / 8;
+
+	str = txt;
+	len = strlen(txt);
+
+	while (len > 0)
+	{
+		pos = maxlen;
+		if (pos > len)
+			pos = len;
+
+		while ((str[pos] != ' ') && (str[pos] != ',') &&
+		       (str[pos] != '.') && (str[pos] != '\0'))
+		{
+			pos--;
+		}
+
+		len = len - pos - 1;
+
+		for (bptr = strbuf; pos >= 0; pos--)
+			*bptr++ = *str++;
+
+		*bptr = '\0';
+
+		gfx_display_text(tx, ty, strbuf);
+		ty += (8 * GFX_SCALE);
+	}
+}
+
+
+void gfx_draw_scanner(void)
+{
+	int x, y;
+	int dst_x, dst_y;
+
+	if (!scanner_pixels)
+		return;
+
+	/* Set clip region to the scanner area */
+	int old_ctx = clip_tx, old_cty = clip_ty, old_cbx = clip_bx, old_cby = clip_by;
+	clip_tx = GFX_X_OFFSET;
+	clip_ty = 385 + GFX_Y_OFFSET;
+	clip_bx = GFX_X_OFFSET + scanner_w - 1;
+	if (clip_bx >= N64_SCREEN_W) clip_bx = N64_SCREEN_W - 1;
+	clip_by = GFX_Y_OFFSET + 385 + scanner_h - 1;
+	if (clip_by >= N64_SCREEN_H) clip_by = N64_SCREEN_H - 1;
+
+	/* Blit the scanner bitmap faithfully */
+	for (y = 0; y < scanner_h; y++)
+	{
+		dst_y = 385 + GFX_Y_OFFSET + y;
+		if (dst_y >= N64_SCREEN_H) break;
+		for (x = 0; x < scanner_w; x++)
+		{
+			dst_x = GFX_X_OFFSET + x;
+			if (dst_x >= N64_SCREEN_W) break;
+			framebuf[dst_y * N64_SCREEN_W + dst_x] = scanner_pixels[y * scanner_w + x];
+		}
+	}
+
+	/* Restore clip region */
+	clip_tx = old_ctx; clip_ty = old_cty;
+	clip_bx = old_cbx; clip_by = old_cby;
+}
+
+
+void gfx_set_clip_region(int tx, int ty, int bx, int by)
+{
+	clip_tx = tx + GFX_X_OFFSET;
+	clip_ty = ty + GFX_Y_OFFSET;
+	clip_bx = bx + GFX_X_OFFSET;
+	clip_by = by + GFX_Y_OFFSET;
+
+	/* Clamp */
+	if (clip_tx < 0) clip_tx = 0;
+	if (clip_ty < 0) clip_ty = 0;
+	if (clip_bx >= N64_SCREEN_W) clip_bx = N64_SCREEN_W - 1;
+	if (clip_by >= N64_SCREEN_H) clip_by = N64_SCREEN_H - 1;
+}
+
+
+void gfx_start_render(void)
+{
+	start_poly = 0;
+	total_polys = 0;
+}
+
+
+void gfx_render_polygon(int num_points, int *point_list, int face_colour, int zavg)
+{
+	int i;
+	int x;
+	int nx;
+
+	if (total_polys == MAX_POLYS)
+		return;
+
+	x = total_polys;
+	total_polys++;
+
+	poly_chain[x].no_points = num_points;
+	poly_chain[x].face_colour = face_colour;
+	poly_chain[x].z = zavg;
+	poly_chain[x].next = -1;
+
+	for (i = 0; i < 16; i++)
+		poly_chain[x].point_list[i] = point_list[i];
+
+	if (x == 0)
+		return;
+
+	if (zavg > poly_chain[start_poly].z)
+	{
+		poly_chain[x].next = start_poly;
+		start_poly = x;
+		return;
+	}
+
+	for (i = start_poly; poly_chain[i].next != -1; i = poly_chain[i].next)
+	{
+		nx = poly_chain[i].next;
+
+		if (zavg > poly_chain[nx].z)
+		{
+			poly_chain[i].next = x;
+			poly_chain[x].next = nx;
+			return;
+		}
+	}
+
+	poly_chain[i].next = x;
+}
+
+
+void gfx_render_line(int x1, int y1, int x2, int y2, int dist, int col)
+{
+	int point_list[4];
+
+	point_list[0] = x1;
+	point_list[1] = y1;
+	point_list[2] = x2;
+	point_list[3] = y2;
+
+	gfx_render_polygon(2, point_list, col, dist);
+}
+
+
+void gfx_finish_render(void)
+{
+	int num_points;
+	int *pl;
+	int i;
+	int col;
+
+	if (total_polys == 0)
+		return;
+
+	for (i = start_poly; i != -1; i = poly_chain[i].next)
+	{
+		num_points = poly_chain[i].no_points;
+		pl = poly_chain[i].point_list;
+		col = poly_chain[i].face_colour;
+
+		if (num_points == 2)
+		{
+			gfx_draw_colour_line(pl[0], pl[1], pl[2], pl[3], col);
+			continue;
+		}
+
+		gfx_polygon(num_points, pl, col);
+	};
+}
+
+
+/* Software polygon fill using scanline rasterization */
+void gfx_polygon(int num_points, int *poly_list, int face_colour)
+{
+	int i;
+	int x, y;
+	int min_y, max_y;
+	int scanline_min[N64_SCREEN_H];
+	int scanline_max[N64_SCREEN_H];
+	int j;
+
+	x = 0;
+	y = 1;
+	for (i = 0; i < num_points; i++)
+	{
+		poly_list[x] += GFX_X_OFFSET;
+		poly_list[y] += GFX_Y_OFFSET;
+		x += 2;
+		y += 2;
+	}
+
+	/* Find Y extents */
+	min_y = N64_SCREEN_H;
+	max_y = 0;
+	for (i = 0; i < num_points; i++)
+	{
+		int py = poly_list[i * 2 + 1];
+		if (py < min_y) min_y = py;
+		if (py > max_y) max_y = py;
+	}
+
+	if (min_y < clip_ty) min_y = clip_ty;
+	if (max_y > clip_by) max_y = clip_by;
+	if (min_y > max_y) return;
+
+	/* Init scanline bounds */
+	for (i = min_y; i <= max_y; i++)
+	{
+		scanline_min[i] = N64_SCREEN_W;
+		scanline_max[i] = 0;
+	}
+
+	/* Trace all edges */
+	for (i = 0; i < num_points; i++)
+	{
+		int x1 = poly_list[i * 2];
+		int y1 = poly_list[i * 2 + 1];
+		j = (i + 1) % num_points;
+		int x2 = poly_list[j * 2];
+		int y2 = poly_list[j * 2 + 1];
+
+		int dy = abs(y2 - y1);
+		int dx = abs(x2 - x1);
+		int sx = (x1 < x2) ? 1 : -1;
+		int sy = (y1 < y2) ? 1 : -1;
+		int err = dx - dy;
+		int cx = x1, cy = y1;
+
+		for (;;)
+		{
+			if (cy >= min_y && cy <= max_y)
+			{
+				if (cx < scanline_min[cy]) scanline_min[cy] = cx;
+				if (cx > scanline_max[cy]) scanline_max[cy] = cx;
+			}
+			if (cx == x2 && cy == y2) break;
+			int e2 = 2 * err;
+			if (e2 > -dy) { err -= dy; cx += sx; }
+			if (e2 < dx) { err += dx; cy += sy; }
+		}
+	}
+
+	/* Fill scanlines */
+	for (i = min_y; i <= max_y; i++)
+	{
+		if (scanline_min[i] <= scanline_max[i])
+		{
+			int sx = scanline_min[i];
+			int ex = scanline_max[i];
+			if (sx < clip_tx) sx = clip_tx;
+			if (ex > clip_bx) ex = clip_bx;
+			if (sx <= ex)
+				memset(&framebuf[i * N64_SCREEN_W + sx], face_colour, ex - sx + 1);
+		}
+	}
+}
+
+
+/*
+ * Sprite data loaded from ROM filesystem.
+ * These are raw indexed-color bitmaps extracted from elite.dat.
+ */
+#define MAX_SPRITES 14
+static uint8_t *sprite_pixels[MAX_SPRITES];
+static int sprite_w[MAX_SPRITES];
+static int sprite_h[MAX_SPRITES];
+static int sprites_loaded = 0;
+
+/* Sprite indices match alg_data.h defines */
+static const char *sprite_files[MAX_SPRITES] = {
+	"blake.raw",     /* BLAKE = 0 */
+	NULL,            /* DANUBE = 1 (MIDI, skip) */
+	"ecm.raw",       /* ECM = 2 */
+	NULL,            /* ELITE_1 = 3 (FONT, skip) */
+	NULL,            /* ELITE_2 = 4 (FONT, skip) */
+	"elitetxt.raw",  /* ELITETXT = 5 */
+	NULL,            /* FRONTV = 6 (unused in sprite drawing) */
+	"grndot.raw",    /* GRNDOT = 7 */
+	"missile_g.raw", /* MISSILE_G = 8 */
+	"missile_r.raw", /* MISSILE_R = 9 */
+	"missile_y.raw", /* MISSILE_Y = 10 */
+	"reddot.raw",    /* REDDOT = 11 */
+	"safe.raw",      /* SAFE = 12 */
+	NULL,            /* THEME = 13 (MIDI, skip) */
+};
+
+/* Map IMG_* constants to sprite file indices */
+static int img_to_sprite(int sprite_no)
+{
+	switch (sprite_no)
+	{
+		case IMG_GREEN_DOT:      return 7;   /* GRNDOT */
+		case IMG_RED_DOT:        return 11;  /* REDDOT */
+		case IMG_BIG_S:          return 12;  /* SAFE */
+		case IMG_ELITE_TXT:      return 5;   /* ELITETXT */
+		case IMG_BIG_E:          return 2;   /* ECM */
+		case IMG_BLAKE:          return 0;   /* BLAKE */
+		case IMG_MISSILE_GREEN:  return 8;   /* MISSILE_G */
+		case IMG_MISSILE_YELLOW: return 10;  /* MISSILE_Y */
+		case IMG_MISSILE_RED:    return 9;   /* MISSILE_R */
+		default: return -1;
+	}
+}
+
+
+void gfx_draw_sprite(int sprite_no, int x, int y)
+{
+	int idx;
+	int sx, sy;
+	int w, h;
+	const uint8_t *pixels;
+
+	idx = img_to_sprite(sprite_no);
+	if (idx < 0 || !sprite_pixels[idx])
+		return;
+
+	pixels = sprite_pixels[idx];
+	w = sprite_w[idx];
+	h = sprite_h[idx];
+
+	if (x == -1)
+		x = ((256 * GFX_SCALE) - w) / 2;
+
+	x += GFX_X_OFFSET;
+	y += GFX_Y_OFFSET;
+
+	for (sy = 0; sy < h; sy++)
+	{
+		for (sx = 0; sx < w; sx++)
+		{
+			uint8_t pixel = pixels[sy * w + sx];
+			if (pixel != 0)  /* 0 = transparent */
+				fb_putpixel(x + sx, y + sy, pixel);
+		}
+	}
+}
+
+
+int gfx_request_file(char *title, char *path, char *ext)
+{
+	/* No file dialog on N64 - use fixed save slots */
+	/* Return 1 to indicate "ok" with the default path */
+	return 1;
+}

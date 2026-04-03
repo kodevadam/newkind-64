@@ -26,6 +26,26 @@
 #ifndef GFX_H
 #define GFX_H
 
+#ifdef RES_640_480
+
+#define GFX_SCALE		(2)
+#define GFX_X_OFFSET	(64)
+#define GFX_Y_OFFSET	(0)
+#define GFX_X_CENTRE	(256)
+#define GFX_Y_CENTRE	(192)
+
+#define GFX_VIEW_TX		1
+#define GFX_VIEW_TY		1
+#define GFX_VIEW_BX		509
+#define GFX_VIEW_BY		381
+
+#define SCANNER_Y		385
+
+#define N64_SCREEN_W	640
+#define N64_SCREEN_H	480
+
+#endif
+
 #ifdef RES_512_512
 
 #define GFX_SCALE		(2)

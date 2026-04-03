@@ -18,7 +18,9 @@
  
  
 #include <stdlib.h>
+#ifndef PLATFORM_N64
 #include "allegro.h"
+#endif
 
 #include "random.h"
 
