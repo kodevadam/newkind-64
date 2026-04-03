@@ -208,10 +208,7 @@ int gfx_graphics_startup(void)
 	 * Since the game's internal coordinates are 512x384 centered in
 	 * 640x480, on a 16:9 TV the image will appear wider and shorter
 	 * which actually helps with the vertical clipping issue. */
-	if (n64_widescreen)
-		display_init(RESOLUTION_640x480, DEPTH_16_BPP, 3, GAMMA_NONE, FILTERS_RESAMPLE);
-	else
-		display_init(RESOLUTION_512x480, DEPTH_16_BPP, 3, GAMMA_NONE, FILTERS_RESAMPLE);
+	display_init(RESOLUTION_640x480, DEPTH_16_BPP, 3, GAMMA_NONE, FILTERS_RESAMPLE);
 
 	/* Try to load palette from the scanner BMP (the authentic Elite palette) */
 	if (load_scanner_bmp(scanner_filename) != 0)
@@ -267,7 +264,8 @@ void gfx_update_screen(void)
 {
 	surface_t *disp;
 	uint16_t *pixels;
-	int x, y;
+	int i;
+	int total = N64_SCREEN_W * N64_SCREEN_H;
 
 	/* Wait for frame timing */
 	while (frame_count < 1)
@@ -277,37 +275,9 @@ void gfx_update_screen(void)
 	disp = display_get();
 	pixels = (uint16_t *)disp->buffer;
 
-	int disp_w = disp->width;
-	int disp_h = disp->height;
-	int disp_stride = disp->stride / 2; /* stride in uint16_t units */
-
-	if (disp_w >= N64_SCREEN_W)
-	{
-		/* 640x480 mode: direct 1:1 blit */
-		for (y = 0; y < disp_h && y < N64_SCREEN_H; y++)
-		{
-			for (x = 0; x < disp_w && x < N64_SCREEN_W; x++)
-			{
-				pixels[y * disp_stride + x] = palette_rgba16[framebuf[y * N64_SCREEN_W + x]];
-			}
-		}
-	}
-	else
-	{
-		/* 512x480 mode: blit from the center of the 640-wide framebuffer.
-		 * The game content starts at GFX_X_OFFSET=64, so we skip the
-		 * left margin and copy 512 pixels per row. */
-		int src_x_start = GFX_X_OFFSET;
-		for (y = 0; y < disp_h && y < N64_SCREEN_H; y++)
-		{
-			for (x = 0; x < disp_w; x++)
-			{
-				int src_x = src_x_start + x;
-				if (src_x < N64_SCREEN_W)
-					pixels[y * disp_stride + x] = palette_rgba16[framebuf[y * N64_SCREEN_W + src_x]];
-			}
-		}
-	}
+	/* Convert indexed framebuffer to RGBA5551 */
+	for (i = 0; i < total; i++)
+		pixels[i] = palette_rgba16[framebuf[i]];
 
 	display_show(disp);
 }

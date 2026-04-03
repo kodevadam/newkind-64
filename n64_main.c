@@ -1261,88 +1261,13 @@ static void initialise_n64(void)
 }
 
 
-/* Widescreen mode flag - set by boot menu */
+/* Widescreen mode flag */
 int n64_widescreen = 0;
-
-/*
- * Boot menu: shown before game starts.
- * Lets user select display mode.
- */
-static void show_boot_menu(void)
-{
-	int selection = 0;
-	surface_t *disp;
-	uint16_t *pixels;
-	int i;
-
-	/* Need joypad for the menu */
-	joypad_init();
-
-	/* Simple menu on a black screen using the raw display */
-	display_init(RESOLUTION_512x480, DEPTH_16_BPP, 2, GAMMA_NONE, FILTERS_RESAMPLE);
-
-	for (;;)
-	{
-		joypad_poll();
-		joypad_buttons_t pressed = joypad_get_buttons_pressed(JOYPAD_PORT_1);
-
-		if (pressed.d_up || pressed.d_down)
-			selection ^= 1;
-
-		if (pressed.a || pressed.start)
-			break;
-
-		disp = display_get();
-		pixels = (uint16_t *)disp->buffer;
-
-		/* Clear to black */
-		memset(pixels, 0, 512 * 480 * 2);
-
-		/* Draw boot menu using colored rectangles as labels.
-		 * Can't use the game font system yet (not initialized),
-		 * so selection is indicated by color: gold = selected, grey = not. */
-		{
-			int tx, ty;
-			uint16_t gold  = 0xFFC1;
-			uint16_t grey  = 0x8411;
-			int w = 512;
-
-			/* Title bar */
-			for (tx = 120; tx < 392; tx++)
-				pixels[80 * w + tx] = gold;
-			for (tx = 180; tx < 332; tx++)
-				pixels[100 * w + tx] = gold;
-
-			/* Option 1: 4:3 (512x480) */
-			for (ty = 200; ty < 220; ty++)
-				for (tx = 100; tx < 412; tx++)
-					pixels[ty * w + tx] = (selection == 0) ? gold : grey;
-
-			/* Option 2: 16:9 Widescreen (640x480) */
-			for (ty = 250; ty < 270; ty++)
-				for (tx = 100; tx < 412; tx++)
-					pixels[ty * w + tx] = (selection == 1) ? gold : grey;
-
-			/* Hint bar */
-			for (tx = 80; tx < 432; tx++)
-				pixels[400 * w + tx] = grey;
-		}
-
-		display_show(disp);
-	}
-
-	n64_widescreen = selection;
-	display_close();
-}
 
 
 int main(void)
 {
 	initialise_n64();
-
-	/* Show boot menu before initialising game graphics */
-	show_boot_menu();
-
 	read_config_file();
 
 	if (gfx_graphics_startup() == 1)
