@@ -1247,6 +1247,12 @@ void info_message(char *message)
 }
 
 
+void update_screen(void)
+{
+	gfx_update_screen();
+}
+
+
 /*
  * N64 initialization - replaces initialise_allegro()
  */

@@ -25,7 +25,9 @@
 
 #include "vector.h"
 
+#ifndef PLATFORM_N64
 #include "alg_data.h"
+#endif
 
 #include "config.h"
 #include "elite.h"
