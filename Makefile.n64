@@ -1,30 +1,12 @@
-#
-# Elite - The New Kind.
-#
-# Nintendo 64 Makefile using libdragon.
-#
-# Prerequisites:
-#   - libdragon SDK installed (https://github.com/DragonMinded/libdragon)
-#   - N64 toolchain in PATH (use libdragon's Docker container or native install)
-#   - Set N64_INST environment variable to your libdragon installation path
-#
-# Build with Docker (recommended):
-#   libdragon make -f Makefile.n64
-#
-# Build native:
-#   make -f Makefile.n64
-#
-# Clean:
-#   make -f Makefile.n64 clean
-#
+BUILD_DIR = build
+SOURCE_DIR = .
 
-# Include libdragon build system first (provides N64 toolchain vars)
 include $(N64_INST)/include/n64.mk
 
-# ROM name
-ROM_NAME = elite_newkind
+N64_ROM_TITLE = "Elite - The New Kind"
+N64_ROM_SAVETYPE = eeprom16k
+N64_ROM_REGIONFREE = true
 
-# Source files for the N64 build.
 SRCS = \
 	n64_main.c \
 	n64_gfx.c \
@@ -50,72 +32,39 @@ SRCS = \
 	trade.c \
 	vector.c
 
-OBJS = $(SRCS:%.c=%.o)
+OBJS = $(SRCS:%.c=$(BUILD_DIR)/%.o)
 
-# N64 compile flags
-CFLAGS += -DPLATFORM_N64 -I. -O2
+CFLAGS += -DPLATFORM_N64 -I. -Wno-error
 
-# Filesystem directory for ROM assets
-FS_DIR = filesystem
+# Filesystem assets
+WAV_SRCS = launch.wav crash.wav dock.wav gameover.wav pulse.wav hitem.wav \
+           explode.wav ecm.wav missile.wav hyper.wav incom1.wav incom2.wav \
+           beep.wav boop.wav
+WAV64_TARGETS = $(WAV_SRCS:%.wav=filesystem/%.wav64)
 
-# WAV files to convert to wav64
-WAV_FILES = launch.wav crash.wav dock.wav gameover.wav pulse.wav hitem.wav \
-            explode.wav ecm.wav missile.wav hyper.wav incom1.wav incom2.wav \
-            beep.wav boop.wav
+all: elite_newkind.z64
 
-WAV64_FILES = $(WAV_FILES:%.wav=$(FS_DIR)/%.wav64)
+filesystem:
+	@mkdir -p filesystem
 
-# Data files to include in ROM filesystem
-FS_DATA = $(FS_DIR)/newkind.cfg $(FS_DIR)/newscan.cfg $(FS_DIR)/scanner.bmp
+filesystem/%.wav64: %.wav | filesystem
+	@echo "    [AUDIO] $<"
+	$(N64_AUDIOCONV) -o $@ $<
 
-all: $(ROM_NAME).z64
-
-$(FS_DIR):
-	mkdir -p $(FS_DIR)
-
-# Convert WAV files to wav64 format for libdragon
-$(FS_DIR)/%.wav64: %.wav | $(FS_DIR)
-	@echo "  [WAV64] $<"
-	$(N64_INST)/bin/audioconv64 -o $@ $<
-
-# Copy data files to filesystem staging
-$(FS_DIR)/newkind.cfg: newkind.cfg | $(FS_DIR)
+filesystem/newkind.cfg: newkind.cfg | filesystem
+	cp $< $@
+filesystem/newscan.cfg: newscan.cfg | filesystem
+	cp $< $@
+filesystem/scanner.bmp: scanner.bmp | filesystem
 	cp $< $@
 
-$(FS_DIR)/newscan.cfg: newscan.cfg | $(FS_DIR)
-	cp $< $@
+FILESYSTEM_DEPS = $(WAV64_TARGETS) filesystem/newkind.cfg filesystem/newscan.cfg filesystem/scanner.bmp
 
-$(FS_DIR)/scanner.bmp: scanner.bmp | $(FS_DIR)
-	cp $< $@
-
-# Build the DFS filesystem image
-$(ROM_NAME).dfs: $(WAV64_FILES) $(FS_DATA)
-	$(N64_INST)/bin/mkdfs $@ $(FS_DIR)
-
-# Compile C sources (n64.mk provides the rules)
-%.o: %.c
-	@echo "  [CC] $<"
-	$(CC) -c $(CFLAGS) -o $@ $<
-
-# Link
-$(ROM_NAME).elf: $(OBJS)
-	$(CC) -o $@ $^ $(LDFLAGS) -ldragon -lm -lc -ldragonsys
-
-# Create ROM with DFS appended
-$(ROM_NAME).z64: $(ROM_NAME).elf $(ROM_NAME).dfs
-	$(N64_INST)/bin/n64tool \
-		-l 4M \
-		-h $(N64_INST)/mips64-elf/lib/header \
-		-o $@ \
-		-t "Elite - The New Kind" \
-		$< \
-		-s 1M $(ROM_NAME).dfs
-	$(N64_INST)/bin/chksum64 $@
-	@echo ""
-	@echo "ROM built: $@ ($(shell stat -c%s $@ 2>/dev/null || echo '?') bytes)"
+$(BUILD_DIR)/elite_newkind.dfs: $(FILESYSTEM_DEPS)
+elite_newkind.z64: $(BUILD_DIR)/elite_newkind.elf $(BUILD_DIR)/elite_newkind.dfs
+$(BUILD_DIR)/elite_newkind.elf: $(OBJS)
 
 clean:
-	rm -f $(OBJS) $(ROM_NAME).elf $(ROM_NAME).z64 $(ROM_NAME).dfs
-	rm -rf $(FS_DIR)
+	rm -rf $(BUILD_DIR) filesystem elite_newkind.z64
 
 .PHONY: all clean

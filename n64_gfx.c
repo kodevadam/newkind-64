@@ -251,7 +251,7 @@ void gfx_graphics_shutdown(void)
  */
 void gfx_update_screen(void)
 {
-	surface_t disp;
+	surface_t *disp;
 	uint16_t *pixels;
 	int i;
 	int total = N64_SCREEN_W * N64_SCREEN_H;
@@ -262,7 +262,7 @@ void gfx_update_screen(void)
 	frame_count = 0;
 
 	disp = display_get();
-	pixels = (uint16_t *)disp.buffer;
+	pixels = (uint16_t *)disp->buffer;
 
 	/* Convert indexed framebuffer to RGBA5551 */
 	for (i = 0; i < total; i++)

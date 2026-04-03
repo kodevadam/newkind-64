@@ -412,7 +412,7 @@ void expand_description (char *source)
 					capitalise_name (str);
 					for (ptr = str; *ptr != '\0';)
 						*desc_ptr++ = *ptr++;
-						desc_ptr--;
+					desc_ptr--;
 					strcpy (desc_ptr, "ian");
 					desc_ptr += 3;
 					break;

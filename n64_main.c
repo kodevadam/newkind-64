@@ -62,14 +62,6 @@ int remap_keys;
 int find_input;
 char find_name[20];
 
-/* XOR drawing mode toggle (replaces Allegro's xor_mode) */
-static int xor_draw_mode = 0;
-
-static void xor_mode(int enable)
-{
-	xor_draw_mode = enable;
-}
-
 
 /*
  * Initialise the game parameters.
@@ -715,11 +707,7 @@ void run_escape_sequence(void)
 	abandon_ship();
 }
 
-static int cheat_arg = 0;
-static void check_cheat_keys(void)
-{
-	/* Cheat keys not available on N64 controller - no-op */
-}
+static int cheat_arg __attribute__((unused)) = 0;
 
 void handle_flight_keys(void)
 {
@@ -1020,10 +1008,10 @@ void set_commander_name(char *path)
 
 	for (i = 0; i < 31; i++)
 	{
-		if (!isalnum(*fname))
+		if (!isalnum((unsigned char)*fname))
 			break;
 
-		*cname++ = toupper(*fname++);
+		*cname++ = toupper((unsigned char)*fname++);
 	}
 
 	*cname = '\0';

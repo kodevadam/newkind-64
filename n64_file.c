@@ -257,7 +257,6 @@ int save_commander_file(char *path)
 	unsigned char block[256];
 	int i;
 	int chk;
-	uint32_t magic = SAVE_MAGIC;
 
 	(void)path; /* Unused on N64 */
 

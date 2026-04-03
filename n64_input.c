@@ -40,6 +40,7 @@
 
 /* Virtual keyboard text input state for planet finder */
 static int text_input_cursor;
+static const char text_input_alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 int kbd_F1_pressed;
 int kbd_F2_pressed;
