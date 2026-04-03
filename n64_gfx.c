@@ -264,8 +264,7 @@ void gfx_update_screen(void)
 {
 	surface_t *disp;
 	uint16_t *pixels;
-	int i;
-	int total = N64_SCREEN_W * N64_SCREEN_H;
+	int y;
 
 	/* Wait for frame timing */
 	while (frame_count < 1)
@@ -275,9 +274,43 @@ void gfx_update_screen(void)
 	disp = display_get();
 	pixels = (uint16_t *)disp->buffer;
 
-	/* Convert indexed framebuffer to RGBA5551 */
-	for (i = 0; i < total; i++)
-		pixels[i] = palette_rgba16[framebuf[i]];
+	/*
+	 * Optimized blit: only convert the active game area, not the
+	 * black borders. The game content is 512 pixels wide starting
+	 * at x=GFX_X_OFFSET(64), and 480 pixels tall.
+	 * Write 2 pixels at a time using 32-bit writes for speed.
+	 */
+	{
+		/* Clear entire display (borders are black).
+		 * Only need to clear left/right 64px borders, but memset
+		 * of the full buffer is simpler and the borders are small. */
+		static int borders_cleared = 0;
+		if (borders_cleared < 4) /* Clear first 4 frames for triple-buffer */
+		{
+			memset(pixels, 0, N64_SCREEN_W * N64_SCREEN_H * 2);
+			borders_cleared++;
+		}
+
+		/* Convert only the 512-wide active area */
+		int x_start = GFX_X_OFFSET;
+		int x_end = GFX_X_OFFSET + 512;
+		const uint16_t *pal = palette_rgba16;
+
+		for (y = 0; y < N64_SCREEN_H; y++)
+		{
+			const uint8_t *src = &framebuf[y * N64_SCREEN_W + x_start];
+			uint32_t *dst32 = (uint32_t *)&pixels[y * N64_SCREEN_W + x_start];
+			int x;
+
+			/* Process 2 pixels per iteration (32-bit write) */
+			for (x = 0; x < 512; x += 2)
+			{
+				uint16_t p0 = pal[src[x]];
+				uint16_t p1 = pal[src[x + 1]];
+				*dst32++ = ((uint32_t)p0 << 16) | p1;
+			}
+		}
+	}
 
 	display_show(disp);
 }

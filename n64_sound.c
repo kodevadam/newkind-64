@@ -56,8 +56,9 @@ void snd_sound_startup(void)
 
 	sound_on = 1;
 
-	/* Initialize audio subsystem at 44100 Hz to match WAV sample rates */
-	audio_init(44100, 4);
+	/* Initialize audio at 16000 Hz - low enough for N64 CPU headroom.
+	 * WAV files are resampled to this rate during build via audioconv64. */
+	audio_init(16000, 4);
 	mixer_init(SFX_CHANNELS);
 
 	/* Load all sound samples from ROM filesystem */
