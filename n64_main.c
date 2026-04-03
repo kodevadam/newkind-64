@@ -1279,7 +1279,7 @@ static void show_boot_menu(void)
 	joypad_init();
 
 	/* Simple menu on a black screen using the raw display */
-	display_init(RESOLUTION_320x240, DEPTH_16_BPP, 2, GAMMA_NONE, ANTIALIAS_OFF);
+	display_init(RESOLUTION_512x480, DEPTH_16_BPP, 2, GAMMA_NONE, FILTERS_RESAMPLE);
 
 	for (;;)
 	{
@@ -1296,46 +1296,36 @@ static void show_boot_menu(void)
 		pixels = (uint16_t *)disp->buffer;
 
 		/* Clear to black */
-		memset(pixels, 0, 320 * 240 * 2);
+		memset(pixels, 0, 512 * 480 * 2);
 
-		/* Draw title text by writing white pixels in a simple pattern */
-		/* We don't have the font system yet, so draw with raw pixels */
+		/* Draw boot menu using colored rectangles as labels.
+		 * Can't use the game font system yet (not initialized),
+		 * so selection is indicated by color: gold = selected, grey = not. */
 		{
-			/* "ELITE - THE NEW KIND" at top */
-			const char *title = "ELITE - THE NEW KIND";
-			const char *sub = "N64 PORT";
-			const char *opt1 = "4:3 (640x480)";
-			const char *opt2 = "16:9 WIDESCREEN";
-			const char *hint = "D-Pad to select, A to confirm";
 			int tx, ty;
-			uint16_t white = 0xFFFF;
 			uint16_t gold  = 0xFFC1;
 			uint16_t grey  = 0x8411;
+			int w = 512;
 
-			/* Very simple 4x6 font embedded inline for boot menu only */
-			/* Write colored rectangles as selection indicators */
-			/* Title area */
-			for (tx = 80; tx < 240; tx++)
-				pixels[40 * 320 + tx] = gold;
-			for (tx = 120; tx < 200; tx++)
-				pixels[50 * 320 + tx] = white;
+			/* Title bar */
+			for (tx = 120; tx < 392; tx++)
+				pixels[80 * w + tx] = gold;
+			for (tx = 180; tx < 332; tx++)
+				pixels[100 * w + tx] = gold;
 
-			/* Option boxes */
-			for (ty = 100; ty < 112; ty++)
-				for (tx = 60; tx < 260; tx++)
-					pixels[ty * 320 + tx] = (selection == 0) ? gold : grey;
+			/* Option 1: 4:3 (512x480) */
+			for (ty = 200; ty < 220; ty++)
+				for (tx = 100; tx < 412; tx++)
+					pixels[ty * w + tx] = (selection == 0) ? gold : grey;
 
-			for (ty = 125; ty < 137; ty++)
-				for (tx = 60; tx < 260; tx++)
-					pixels[ty * 320 + tx] = (selection == 1) ? gold : grey;
+			/* Option 2: 16:9 Widescreen (640x480) */
+			for (ty = 250; ty < 270; ty++)
+				for (tx = 100; tx < 412; tx++)
+					pixels[ty * w + tx] = (selection == 1) ? gold : grey;
 
-			/* Draw text using the most minimal approach - write chars as blocks */
-			/* Since we can't use the game font yet, just use colored bars as labels */
-			/* The selection color (gold vs grey) makes it clear which is selected */
-
-			/* Hint bar at bottom */
-			for (tx = 40; tx < 280; tx++)
-				pixels[200 * 320 + tx] = grey;
+			/* Hint bar */
+			for (tx = 80; tx < 432; tx++)
+				pixels[400 * w + tx] = grey;
 		}
 
 		display_show(disp);
