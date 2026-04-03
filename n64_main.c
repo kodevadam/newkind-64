@@ -1106,9 +1106,14 @@ void run_first_intro_screen(void)
 
 		if (kbd_y_pressed)
 		{
-			snd_stop_midi();
-			load_commander_screen();
-			break;
+			/* Only allow load if a save exists */
+			extern int n64_save_exists(void);
+			if (n64_save_exists())
+			{
+				snd_stop_midi();
+				load_commander_screen();
+				break;
+			}
 		}
 
 		if (kbd_n_pressed)

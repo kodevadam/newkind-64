@@ -34,6 +34,21 @@ void n64_save_init(void)
 	eeprom_available = (eeprom_present() == EEPROM_16K || eeprom_present() == EEPROM_4K);
 }
 
+int n64_save_exists(void)
+{
+	uint8_t buf[8];
+	uint32_t magic;
+
+	if (!eeprom_available)
+		return 0;
+
+	eeprom_read(0, buf);
+	magic = ((uint32_t)buf[0] << 24) | ((uint32_t)buf[1] << 16) |
+	        ((uint32_t)buf[2] << 8) | buf[3];
+
+	return (magic == SAVE_MAGIC);
+}
+
 
 /*
  * Config file is read-only on N64 (baked into ROM).
