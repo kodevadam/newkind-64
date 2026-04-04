@@ -1489,7 +1489,7 @@ int main(void)
 			}
 
 			/* ===== SIMULATION PHASE (only on sim ticks) ===== */
-			if (do_sim && !game_paused)
+			if (do_sim)
 			{
 				gfx_set_clip_region(1, 1, 510, 383);
 				rolling = 0;
@@ -1524,138 +1524,91 @@ int main(void)
 				}
 			}
 
-			/* ===== RENDER PHASE (every frame - NEVER skipped) ===== */
+			/* ===== RENDER PHASE ===== */
 
-			/* Set starfield speed: 1/SIM_RATE for smooth 60fps motion */
+			/* Smooth starfield: 1/SIM_RATE step on every frame */
 			star_delta_scale = 1.0 / SIM_RATE;
 			universe_render_only = !do_sim;
 
+			if (!docked)
 			{
-				int is_flight_view =
-					(current_screen == SCR_FRONT_VIEW) ||
-					(current_screen == SCR_REAR_VIEW) ||
-					(current_screen == SCR_LEFT_VIEW) ||
-					(current_screen == SCR_RIGHT_VIEW);
-
-				int is_space_view = is_flight_view ||
-					(current_screen == SCR_INTRO_ONE) ||
-					(current_screen == SCR_INTRO_TWO) ||
-					(current_screen == SCR_GAME_OVER) ||
-					(current_screen == SCR_ESCAPE_POD);
-
 				gfx_set_clip_region(1, 1, 510, 383);
 
-				if (is_space_view && !docked)
+				if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) ||
+					(current_screen == SCR_LEFT_VIEW) || (current_screen == SCR_RIGHT_VIEW) ||
+					(current_screen == SCR_INTRO_ONE) || (current_screen == SCR_INTRO_TWO) ||
+					(current_screen == SCR_GAME_OVER))
 				{
-					/* Flight / space rendering */
+					gfx_clear_display();
 					update_starfield();
-					update_universe();
-
-					if (docked)
-					{
-						/* Auto-docked during sim */
-						gfx_draw_borders();
-						update_console();
-						continue;
-					}
-
-					if (is_flight_view)
-					{
-						if (draw_lasers)
-						{
-							draw_laser_lines();
-							if (do_sim) draw_lasers--;
-						}
-						draw_laser_sights();
-					}
-
-					if (message_count > 0)
-						gfx_display_centre_text(358, message_string, 120, GFX_COL_WHITE);
-
-					if (hyper_ready)
-					{
-						display_hyper_status();
-						if (do_sim && (mcount & 3) == 0)
-							countdown_hyperspace();
-					}
-
-					/* Simulation-only updates */
-					if (do_sim)
-					{
-						mcount--;
-						if (mcount < 0) mcount = 255;
-
-						if ((mcount & 7) == 0) regenerate_shields();
-
-						if ((mcount & 31) == 10)
-						{
-							if (energy < 50)
-							{
-								info_message("ENERGY LOW");
-								snd_play_sample(SND_BEEP);
-							}
-							update_altitude();
-						}
-
-						if ((mcount & 31) == 20)
-							update_cabin_temp();
-
-						if ((mcount == 0) && (!witchspace))
-							random_encounter();
-
-						cool_laser();
-						time_ecm();
-					}
 				}
-				else
+
+				update_universe();
+
+				if (docked)
 				{
-					/* Non-flight screen: redraw current screen every frame */
-					switch (current_screen)
-					{
-						case SCR_GALACTIC_CHART:
-							display_galactic_chart();
-							break;
-						case SCR_SHORT_RANGE:
-							display_short_range_chart();
-							break;
-						case SCR_PLANET_DATA:
-							display_data_on_planet();
-							break;
-						case SCR_MARKET_PRICES:
-							if (!witchspace) display_market_prices();
-							break;
-						case SCR_CMDR_STATUS:
-							display_commander_status();
-							break;
-						case SCR_INVENTORY:
-							display_inventory();
-							break;
-						case SCR_EQUIP_SHIP:
-							equip_ship();
-							break;
-						case SCR_OPTIONS:
-							display_options();
-							break;
-						case SCR_SETTINGS:
-							/* Settings redrawn by its own handler */
-							break;
-						case SCR_QUIT:
-						case SCR_RESTART:
-							/* These screens redraw themselves */
-							break;
-						default:
-							break;
-					}
+					update_console();
+					continue;
 				}
 
-				gfx_draw_borders();
+				if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) ||
+					(current_screen == SCR_LEFT_VIEW) || (current_screen == SCR_RIGHT_VIEW))
+				{
+					if (draw_lasers)
+					{
+						draw_laser_lines();
+						if (do_sim) draw_lasers--;
+					}
+					draw_laser_sights();
+				}
+
+				if (message_count > 0)
+					gfx_display_centre_text(358, message_string, 120, GFX_COL_WHITE);
+
+				if (hyper_ready)
+				{
+					display_hyper_status();
+					if (do_sim && (mcount & 3) == 0)
+						countdown_hyperspace();
+				}
+
+				if (do_sim)
+				{
+					mcount--;
+					if (mcount < 0) mcount = 255;
+
+					if ((mcount & 7) == 0) regenerate_shields();
+
+					if ((mcount & 31) == 10)
+					{
+						if (energy < 50)
+						{
+							info_message("ENERGY LOW");
+							snd_play_sample(SND_BEEP);
+						}
+						update_altitude();
+					}
+
+					if ((mcount & 31) == 20)
+						update_cabin_temp();
+
+					if ((mcount == 0) && (!witchspace))
+						random_encounter();
+
+					cool_laser();
+					time_ecm();
+				}
+
 				update_console();
 			}
+
+			/* Non-flight screens persist in the framebuf - no per-frame redraw.
+			 * They are drawn once by their display_*() function and stay until
+			 * the next screen transition. */
 
 			if (do_sim && current_screen == SCR_BREAK_PATTERN)
 				display_break_pattern();
 
-			/* Cross handling - no need to erase (screen is cleared each frame) */
 			if (do_sim)
 			{
 				if (cross_timer > 0)
@@ -1667,13 +1620,21 @@ int main(void)
 
 				if ((cross_x != old_cross_x) || (cross_y != old_cross_y))
 				{
+					if (old_cross_x != -1)
+					{
+						/* Erase old cross by drawing black */
+						int half = (current_screen == SCR_GALACTIC_CHART) ? 8 : 16;
+						int clip_b = (current_screen == SCR_GALACTIC_CHART) ? 293 : 339;
+						gfx_set_clip_region(1, 37, 510, clip_b);
+						gfx_draw_colour_line(old_cross_x - half, old_cross_y, old_cross_x + half, old_cross_y, GFX_COL_BLACK);
+						gfx_draw_colour_line(old_cross_x, old_cross_y - half, old_cross_x, old_cross_y + half, GFX_COL_BLACK);
+						gfx_set_clip_region(1, 1, 510, 383);
+					}
 					old_cross_x = cross_x;
 					old_cross_y = cross_y;
+					draw_cross(old_cross_x, old_cross_y);
 				}
 			}
-
-			if (old_cross_x != -1)
-				draw_cross(old_cross_x, old_cross_y);
 		}
 
 		if (game_over < 2)

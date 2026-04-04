@@ -24,11 +24,13 @@
 /* The 256-color palette, stored as RGBA5551 for direct write */
 static uint16_t palette_rgba16[256];
 
-/* Active framebuffer pointer - points to current display surface.
- * Set by gfx_acquire_screen(), cleared by gfx_update_screen().
- * All rendering functions write through this pointer. */
-static uint16_t *active_fb;
-static surface_t *active_disp;
+/* Private framebuffer - persistent between frames for screens that draw once.
+ * Flight views clear and redraw every frame; info screens persist.
+ * Aligned to 16 bytes for optimal DMA/cache line operations. */
+static uint16_t framebuf[N64_SCREEN_W * N64_SCREEN_H] __attribute__((aligned(16)));
+
+/* Pointer used by all rendering functions. Points to framebuf. */
+static uint16_t *active_fb = framebuf;
 
 volatile int frame_count;
 static timer_link_t *frame_timer_handle;
@@ -198,7 +200,23 @@ static inline void fb_putpixel_fast(int x, int y, int col)
 }
 
 
-static void acquire_and_clear(void);
+/* Fast 64-bit framebuffer copy. */
+static void fast_framebuf_copy(void *dst, const void *src, int nbytes)
+{
+	const uint64_t *s = (const uint64_t *)src;
+	uint64_t *d = (uint64_t *)dst;
+	int n = nbytes / 64;
+	int i;
+	for (i = 0; i < n; i++)
+	{
+		uint64_t a = s[0], b = s[1], c = s[2], d0 = s[3];
+		uint64_t e = s[4], f = s[5], g = s[6], h = s[7];
+		d[0] = a; d[1] = b; d[2] = c; d[3] = d0;
+		d[4] = e; d[5] = f; d[6] = g; d[7] = h;
+		s += 8;
+		d += 8;
+	}
+}
 
 /* Widescreen flag from boot menu */
 extern int n64_widescreen;
@@ -225,8 +243,9 @@ int gfx_graphics_startup(void)
 		}
 	}
 
-	active_fb = NULL;
-	active_disp = NULL;
+	/* Clear framebuffer */
+	memset(framebuf, 0, sizeof(framebuf));
+	active_fb = framebuf;
 
 	/* Set default clip region to full screen */
 	clip_tx = 0;
@@ -234,12 +253,13 @@ int gfx_graphics_startup(void)
 	clip_bx = N64_SCREEN_W - 1;
 	clip_by = N64_SCREEN_H - 1;
 
-	/* Acquire first display buffer - after this, active_fb is always valid. */
-	acquire_and_clear();
-
-	/* Draw initial scanner and borders for the first frame. */
+	/* Draw initial scanner from the loaded BMP */
 	gfx_draw_scanner();
-	gfx_draw_borders();
+
+	/* Draw border lines around the view area */
+	gfx_draw_line(0, 0, 0, 384);
+	gfx_draw_line(0, 0, 511, 0);
+	gfx_draw_line(511, 0, 511, 384);
 
 	/* Setup frame timer for game speed regulation */
 	frame_count = 0;
@@ -260,36 +280,23 @@ void gfx_graphics_shutdown(void)
 }
 
 
-/* Internal: acquire a display buffer and clear it to black. */
-static void acquire_and_clear(void)
-{
-	active_disp = display_get();
-	active_fb = (uint16_t *)active_disp->buffer;
-
-	/* Display buffers in libdragon are uncached - writes go directly to
-	 * RDRAM through the CPU write buffer. No cache management needed. */
-	memset(active_fb, 0, N64_SCREEN_W * N64_SCREEN_H * 2);
-}
-
 void gfx_acquire_screen(void)
 {
-	/* Idempotent - safe to call multiple times per frame. */
-	if (active_disp)
-		return;
-	acquire_and_clear();
+	/* No-op - we always render to the private framebuf */
 }
 
 void gfx_update_screen(void)
 {
-	if (!active_disp)
-		acquire_and_clear();
+	surface_t *disp;
 
-	/* Display buffers are uncached - no cache flush needed.
-	 * Just show and acquire the next buffer. */
-	display_show(active_disp);
+	/* display_get() blocks until a buffer is free (~vsync locked). */
+	disp = display_get();
 
-	/* Immediately acquire next buffer so active_fb is ALWAYS valid. */
-	acquire_and_clear();
+	/* Flush framebuf from CPU cache, then fast-copy to display surface. */
+	data_cache_hit_writeback(framebuf, sizeof(framebuf));
+	fast_framebuf_copy(disp->buffer, framebuf, N64_SCREEN_W * N64_SCREEN_H * 2);
+
+	display_show(disp);
 }
 
 
@@ -660,9 +667,7 @@ void gfx_display_centre_text(int y, char *str, int psize, int col)
 }
 
 
-/* Fast zero-fill a region of the display buffer.
- * Since gfx_acquire_screen() already RDP-clears the full screen,
- * this is mainly used for mid-frame partial clears. */
+/* Fast zero-fill a region of the framebuffer. */
 static void fast_clear_region(int x1, int y1, int x2, int y2)
 {
 	int y;
