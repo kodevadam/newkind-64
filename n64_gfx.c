@@ -215,6 +215,7 @@ int gfx_graphics_startup(void)
 	 * 640x480, on a 16:9 TV the image will appear wider and shorter
 	 * which actually helps with the vertical clipping issue. */
 	display_init(RESOLUTION_640x480, DEPTH_16_BPP, 3, GAMMA_NONE, FILTERS_RESAMPLE);
+	rspq_init();
 	rdpq_init();
 
 	/* Try to load palette from the scanner BMP (the authentic Elite palette) */
