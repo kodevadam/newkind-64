@@ -1066,18 +1066,29 @@ void decrease_flight_climb (void)
 void start_hyperspace (void)
 {
 	if (hyper_ready)
+	{
+		info_message("Hyperspace already counting down");
 		return;
-		
+	}
+
 	hyper_distance = calc_distance_to_planet (docked_planet, hyperspace_planet);
 
-	if ((docked_planet.a == hyperspace_planet.a &&
-	     docked_planet.b == hyperspace_planet.b &&
-	     docked_planet.c == hyperspace_planet.c &&
-	     docked_planet.d == hyperspace_planet.d &&
-	     docked_planet.e == hyperspace_planet.e &&
-	     docked_planet.f == hyperspace_planet.f) ||
-	    (hyper_distance > cmdr.fuel))
+	if (docked_planet.a == hyperspace_planet.a &&
+	    docked_planet.b == hyperspace_planet.b &&
+	    docked_planet.c == hyperspace_planet.c &&
+	    docked_planet.d == hyperspace_planet.d &&
+	    docked_planet.e == hyperspace_planet.e &&
+	    docked_planet.f == hyperspace_planet.f)
+	{
+		info_message("Select destination on chart first");
 		return;
+	}
+
+	if (hyper_distance > cmdr.fuel)
+	{
+		info_message("Insufficient fuel for hyperspace");
+		return;
+	}
 
 	destination_planet = hyperspace_planet;
 	name_planet (hyper_name, destination_planet);

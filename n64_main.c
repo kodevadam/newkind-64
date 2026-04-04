@@ -427,6 +427,8 @@ static void roll_left(void)
 	{
 		increase_flight_roll();
 		increase_flight_roll();
+		increase_flight_roll();
+		increase_flight_roll();
 		rolling = 1;
 	}
 }
@@ -437,6 +439,8 @@ static void roll_right(void)
 		flight_roll = 0;
 	else
 	{
+		decrease_flight_roll();
+		decrease_flight_roll();
 		decrease_flight_roll();
 		decrease_flight_roll();
 		rolling = 1;
@@ -450,6 +454,7 @@ static void climb(void)
 	else
 	{
 		increase_flight_climb();
+		increase_flight_climb();
 	}
 	climbing = 1;
 }
@@ -460,6 +465,7 @@ static void dive(void)
 		flight_climb = 0;
 	else
 	{
+		decrease_flight_climb();
 		decrease_flight_climb();
 	}
 	climbing = 1;
@@ -891,7 +897,7 @@ static int cheat_arg __attribute__((unused)) = 0;
 
 void handle_flight_keys(void)
 {
-	int keyasc;
+	int keyasc __attribute__((unused));
 
 	if (docked &&
 		((current_screen == SCR_MARKET_PRICES) ||
@@ -1015,61 +1021,96 @@ void handle_flight_keys(void)
 	if (find_input)
 	{
 #ifdef PLATFORM_N64
-		/* N64 virtual keyboard: D-pad Up/Down cycles letters, A confirms, B deletes/cancels */
-		static int find_letter = 0; /* 0-25 = A-Z */
-
-		if (kbd_up_pressed)
+		/* N64 onscreen keyboard for planet name entry.
+		 * Layout: 2 rows of 13 letters, navigated with D-pad.
+		 * A = type letter, B = delete/cancel, Start = search. */
 		{
-			find_letter = (find_letter + 1) % 26;
-			/* Show preview of next letter */
+			static int osk_x = 0, osk_y = 0;
+			static int osk_drawn = 0;
+			int row, col;
+			char str[40];
+
+			/* Draw the onscreen keyboard */
+			if (!osk_drawn || kbd_up_pressed || kbd_down_pressed ||
+				kbd_left_pressed || kbd_right_pressed ||
+				kbd_enter_pressed || kbd_backspace_pressed || kbd_space_pressed)
 			{
-				char str[40];
-				sprintf(str, "Planet Name? %s%c", find_name, 'A' + find_letter);
-				gfx_clear_text_area();
-				gfx_display_text(16, 340, str);
-			}
-			return;
-		}
+				/* Clear keyboard area */
+				gfx_clear_area(20, 280, 490, 380);
 
-		if (kbd_down_pressed)
-		{
-			find_letter = (find_letter + 25) % 26;
+				/* Show current input */
+				sprintf(str, "Planet Name? %s_", find_name);
+				gfx_display_colour_text(30, 284, str, GFX_COL_GOLD);
+
+				/* Draw keyboard grid: A-M on row 0, N-Z on row 1 */
+				for (row = 0; row < 2; row++)
+				{
+					for (col = 0; col < 13; col++)
+					{
+						int letter_idx = row * 13 + col;
+						if (letter_idx >= 26) break;
+
+						int kx = 40 + col * 32;
+						int ky = 310 + row * 28;
+						int is_selected = (col == osk_x && row == osk_y);
+						char ch[2] = { 'A' + letter_idx, '\0' };
+
+						if (is_selected)
+							gfx_draw_rectangle(kx - 2, ky - 2, kx + 12, ky + 12, GFX_COL_BLUE_4);
+
+						gfx_display_colour_text(kx, ky, ch,
+							is_selected ? GFX_COL_WHITE : GFX_COL_GREY_1);
+					}
+				}
+
+				/* Control hints */
+				gfx_display_colour_text(30, 370, "A:Type  B:Delete  Start:Search", GFX_COL_GREY_1);
+				osk_drawn = 1;
+			}
+
+			/* Navigate */
+			if (kbd_left_pressed)  { osk_x--; if (osk_x < 0) osk_x = (osk_y == 1) ? 12 : 12; }
+			if (kbd_right_pressed) { osk_x++; if (osk_x > 12 || (osk_y == 1 && osk_x > 12)) osk_x = 0; }
+			if (kbd_up_pressed)    { osk_y = 0; }
+			if (kbd_down_pressed)  { osk_y = 1; }
+
+			/* Clamp cursor for row 1 (N-Z = 13 letters) */
+			if (osk_y == 1 && osk_x > 12) osk_x = 12;
+
+			/* A button = type selected letter */
+			if (kbd_enter_pressed)
 			{
-				char str[40];
-				sprintf(str, "Planet Name? %s%c", find_name, 'A' + find_letter);
-				gfx_clear_text_area();
-				gfx_display_text(16, 340, str);
+				int letter_idx = osk_y * 13 + osk_x;
+				if (letter_idx < 26)
+					add_find_char('A' + letter_idx);
+				return;
 			}
-			return;
-		}
 
-		if (kbd_right_pressed)
-		{
-			/* Right = add current letter */
-			add_find_char('A' + find_letter);
-			find_letter = 0;
-			return;
-		}
+			/* B button = delete last char, or cancel if empty */
+			if (kbd_backspace_pressed)
+			{
+				if (strlen(find_name) > 0)
+					delete_find_char();
+				else
+				{
+					find_input = 0;
+					osk_drawn = 0;
+					gfx_clear_area(20, 280, 490, 380);
+				}
+				return;
+			}
 
-		if (kbd_enter_pressed)
-		{
-			/* A = search */
-			find_input = 0;
-			find_planet_by_name(find_name);
-			return;
-		}
-
-		if (kbd_backspace_pressed)
-		{
-			if (strlen(find_name) > 0)
-				delete_find_char();
-			else
+			/* Start = search */
+			if (kbd_space_pressed)
 			{
 				find_input = 0;
-				gfx_clear_text_area();
+				osk_drawn = 0;
+				gfx_clear_area(20, 280, 490, 380);
+				find_planet_by_name(find_name);
+				return;
 			}
-			return;
 		}
+		return;
 #else
 		keyasc = kbd_read_key();
 
