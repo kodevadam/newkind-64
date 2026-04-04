@@ -44,9 +44,25 @@
 #define N64_SCREEN_W	640
 #define N64_SCREEN_H	480
 
-/* N64 TV safe area: ~5% border on each side for CRT overscan */
-#define N64_SAFE_X		32
-#define N64_SAFE_Y		24
+#endif
+
+#ifdef RES_N64_320
+
+#define GFX_SCALE		(1)
+#define GFX_X_OFFSET	(32)
+#define GFX_Y_OFFSET	(0)
+#define GFX_X_CENTRE	(128)
+#define GFX_Y_CENTRE	(96)
+
+#define GFX_VIEW_TX		1
+#define GFX_VIEW_TY		1
+#define GFX_VIEW_BX		253
+#define GFX_VIEW_BY		191
+
+#define SCANNER_Y		193
+
+#define N64_SCREEN_W	320
+#define N64_SCREEN_H	240
 
 #endif
 

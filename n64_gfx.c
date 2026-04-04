@@ -208,7 +208,7 @@ int gfx_graphics_startup(void)
 	 * Since the game's internal coordinates are 512x384 centered in
 	 * 640x480, on a 16:9 TV the image will appear wider and shorter
 	 * which actually helps with the vertical clipping issue. */
-	display_init(RESOLUTION_640x480, DEPTH_16_BPP, 3, GAMMA_NONE, FILTERS_RESAMPLE);
+	display_init(RESOLUTION_640x480, DEPTH_16_BPP, 2, GAMMA_NONE, FILTERS_RESAMPLE);
 
 	/* Try to load palette from the scanner BMP (the authentic Elite palette) */
 	if (load_scanner_bmp(scanner_filename) != 0)
@@ -233,7 +233,7 @@ int gfx_graphics_startup(void)
 	/* Draw initial scanner from the loaded BMP */
 	gfx_draw_scanner();
 
-	/* Draw border lines around the view area (faithful to original) */
+	/* Draw border lines around the view area */
 	gfx_draw_line(0, 0, 0, 384);
 	gfx_draw_line(0, 0, 511, 0);
 	gfx_draw_line(511, 0, 511, 384);
@@ -263,7 +263,6 @@ void gfx_graphics_shutdown(void)
 void gfx_update_screen(void)
 {
 	surface_t *disp;
-	uint16_t *pixels;
 	int y;
 
 	/* Wait for frame timing */
@@ -272,42 +271,32 @@ void gfx_update_screen(void)
 	frame_count = 0;
 
 	disp = display_get();
-	pixels = (uint16_t *)disp->buffer;
 
 	/*
-	 * Optimized blit: only convert the active game area, not the
-	 * black borders. The game content is 512 pixels wide starting
-	 * at x=GFX_X_OFFSET(64), and 480 pixels tall.
-	 * Write 2 pixels at a time using 32-bit writes for speed.
+	 * Convert 8-bit indexed framebuffer to 16-bit RGBA5551.
+	 * Only convert the 512-pixel-wide active area (skip black borders).
+	 * Use uncached writes to avoid polluting the data cache.
 	 */
 	{
-		/* Clear entire display (borders are black).
-		 * Only need to clear left/right 64px borders, but memset
-		 * of the full buffer is simpler and the borders are small. */
-		static int borders_cleared = 0;
-		if (borders_cleared < 4) /* Clear first 4 frames for triple-buffer */
-		{
-			memset(pixels, 0, N64_SCREEN_W * N64_SCREEN_H * 2);
-			borders_cleared++;
-		}
-
-		/* Convert only the 512-wide active area */
-		int x_start = GFX_X_OFFSET;
-		int x_end = GFX_X_OFFSET + 512;
+		/* Get uncached pointer to display buffer for write-combining */
+		uint16_t *pixels_uncached = (uint16_t *)UncachedAddr(disp->buffer);
 		const uint16_t *pal = palette_rgba16;
+		const int stride = disp->stride / 2;
+		const int x_start = GFX_X_OFFSET;
+		const int active_w = 512;
 
 		for (y = 0; y < N64_SCREEN_H; y++)
 		{
 			const uint8_t *src = &framebuf[y * N64_SCREEN_W + x_start];
-			uint32_t *dst32 = (uint32_t *)&pixels[y * N64_SCREEN_W + x_start];
+			uint16_t *dst = &pixels_uncached[y * stride + x_start];
 			int x;
 
-			/* Process 2 pixels per iteration (32-bit write) */
-			for (x = 0; x < 512; x += 2)
+			for (x = 0; x < active_w; x += 4)
 			{
-				uint16_t p0 = pal[src[x]];
-				uint16_t p1 = pal[src[x + 1]];
-				*dst32++ = ((uint32_t)p0 << 16) | p1;
+				dst[x]   = pal[src[x]];
+				dst[x+1] = pal[src[x+1]];
+				dst[x+2] = pal[src[x+2]];
+				dst[x+3] = pal[src[x+3]];
 			}
 		}
 	}
@@ -636,16 +625,14 @@ void gfx_clear_display(void)
 {
 	int y;
 	for (y = GFX_Y_OFFSET + 1; y <= 383 + GFX_Y_OFFSET; y++)
-		memset(&framebuf[y * N64_SCREEN_W + GFX_X_OFFSET + 1], GFX_COL_BLACK,
-		       510);
+		memset(&framebuf[y * N64_SCREEN_W + GFX_X_OFFSET + 1], GFX_COL_BLACK, 510);
 }
 
 void gfx_clear_text_area(void)
 {
 	int y;
 	for (y = GFX_Y_OFFSET + 340; y <= 383 + GFX_Y_OFFSET; y++)
-		memset(&framebuf[y * N64_SCREEN_W + GFX_X_OFFSET + 1], GFX_COL_BLACK,
-		       510);
+		memset(&framebuf[y * N64_SCREEN_W + GFX_X_OFFSET + 1], GFX_COL_BLACK, 510);
 }
 
 
@@ -710,23 +697,25 @@ void gfx_draw_scanner(void)
 {
 	int x, y;
 	int dst_x, dst_y;
+	int src_x, src_y;
 
 	if (!scanner_pixels)
 		return;
 
 	/* Set clip region to the scanner area */
 	int old_ctx = clip_tx, old_cty = clip_ty, old_cbx = clip_bx, old_cby = clip_by;
+
 	clip_tx = GFX_X_OFFSET;
-	clip_ty = 385 + GFX_Y_OFFSET;
+	clip_ty = SCANNER_Y + GFX_Y_OFFSET;
 	clip_bx = GFX_X_OFFSET + scanner_w - 1;
 	if (clip_bx >= N64_SCREEN_W) clip_bx = N64_SCREEN_W - 1;
-	clip_by = GFX_Y_OFFSET + 385 + scanner_h - 1;
+	clip_by = GFX_Y_OFFSET + SCANNER_Y + scanner_h - 1;
 	if (clip_by >= N64_SCREEN_H) clip_by = N64_SCREEN_H - 1;
 
-	/* Blit the scanner bitmap faithfully */
+	/* Blit the scanner bitmap */
 	for (y = 0; y < scanner_h; y++)
 	{
-		dst_y = 385 + GFX_Y_OFFSET + y;
+		dst_y = SCANNER_Y + GFX_Y_OFFSET + y;
 		if (dst_y >= N64_SCREEN_H) break;
 		for (x = 0; x < scanner_w; x++)
 		{
