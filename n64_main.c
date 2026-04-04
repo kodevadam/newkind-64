@@ -1489,7 +1489,7 @@ int main(void)
 			}
 
 			/* ===== SIMULATION PHASE (only on sim ticks) ===== */
-			if (do_sim)
+			if (do_sim && !game_paused)
 			{
 				gfx_set_clip_region(1, 1, 510, 383);
 				rolling = 0;
@@ -1498,33 +1498,33 @@ int main(void)
 				handle_flight_keys();
 				snd_tick_cooldowns();
 
-				if (game_paused)
-					continue;
-
-				if (message_count > 0)
-					message_count--;
-
-				if (!rolling)
+				if (!game_paused)
 				{
-					if (flight_roll > 0) decrease_flight_roll();
-					if (flight_roll < 0) increase_flight_roll();
-				}
+					if (message_count > 0)
+						message_count--;
 
-				if (!climbing)
-				{
-					if (flight_climb > 0) decrease_flight_climb();
-					if (flight_climb < 0) increase_flight_climb();
-				}
+					if (!rolling)
+					{
+						if (flight_roll > 0) decrease_flight_roll();
+						if (flight_roll < 0) increase_flight_roll();
+					}
 
-				if (!docked && auto_pilot)
-				{
-					auto_dock();
-					if ((mcount & 127) == 0)
-						info_message("Docking Computers On");
+					if (!climbing)
+					{
+						if (flight_climb > 0) decrease_flight_climb();
+						if (flight_climb < 0) increase_flight_climb();
+					}
+
+					if (!docked && auto_pilot)
+					{
+						auto_dock();
+						if ((mcount & 127) == 0)
+							info_message("Docking Computers On");
+					}
 				}
 			}
 
-			/* ===== RENDER PHASE (every frame) ===== */
+			/* ===== RENDER PHASE (every frame - NEVER skipped) ===== */
 
 			/* Set starfield speed: 1/SIM_RATE for smooth 60fps motion */
 			star_delta_scale = 1.0 / SIM_RATE;
