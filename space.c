@@ -812,14 +812,14 @@ void display_speed (void)
 {
 	int i, len, colour;
 	/* NES col 28 at 2x = x448, row 27 = y112 relative to scanner */
-	int sx = 448;
+	int sx = 432;
 	int sy = SCANNER_Y + 112;
 
 	len = ((flight_speed * 64) / myship.max_speed) - 1;
-	colour = (flight_speed > (myship.max_speed * 2 / 3)) ? GFX_COL_DARK_RED : GFX_COL_GOLD;
+	colour = (flight_speed > (myship.max_speed * 2 / 3)) ? GFX_COL_DARK_RED : GFX_COL_GREEN_1;
 
-	for (i = 0; i < 14; i++)
-		gfx_draw_colour_line (sx, sy + i, sx + len, sy + i, colour);
+	for (i = 0; i < 6; i++)
+		gfx_draw_colour_line (sx, sy + 6 + i, sx + len, sy + 6 + i, colour);
 }
 
 
@@ -833,14 +833,10 @@ void display_dial_bar (int len, int x, int y)
 	int i;
 	int base = y + SCANNER_Y;
 
-	/* NES-style gauge bar: 14px tall to fill a 16px (2x NES tile) slot.
-	 * Leave 1px border top and bottom. */
-	gfx_draw_colour_line (x, base, x + len, base, GFX_COL_GOLD);
-	gfx_draw_colour_line (x, base + 1, x + len, base + 1, GFX_COL_GOLD);
-	for (i = 2; i < 12; i++)
-		gfx_draw_colour_line (x, base + i, x + len, base + i, GFX_COL_YELLOW_1);
-	gfx_draw_colour_line (x, base + 12, x + len, base + 12, GFX_COL_DARK_RED);
-	gfx_draw_colour_line (x, base + 13, x + len, base + 13, GFX_COL_DARK_RED);
+	/* NES pattern 236 (full bar) at 2x: fill is color 3 in rows 3-5
+	 * of the 8px tile = 2x rows 6-11. Bars are GREEN (palette 1 $1A). */
+	for (i = 0; i < 6; i++)
+		gfx_draw_colour_line (x, base + 6 + i, x + len, base + 6 + i, GFX_COL_GREEN_1);
 }
 
 
@@ -850,36 +846,34 @@ void display_dial_bar (int len, int x, int y)
 
 void display_shields (void)
 {
-	/* NES left column: FU=row23, FS=row24, AS=row25, EN=row26, CT=row27, LT=row28
-	 * BMP y = (row - 22) * 16 + 32 + 1  (32 for icon bar, +1 inside tile) */
+	/* NES has 8px horizontal scroll → subtract 16 at 2x from all X positions.
+	 * Left gauges: NES col 2 at 2x = 32, minus scroll = 16 */
 	if (front_shield > 3)
-		display_dial_bar (front_shield / 4, 32, 65);
+		display_dial_bar (front_shield / 4, 16, 65);
 
 	if (aft_shield > 3)
-		display_dial_bar (aft_shield / 4, 32, 81);
+		display_dial_bar (aft_shield / 4, 16, 81);
 }
 
 
 void display_altitude (void)
 {
-	/* NES row 28 (altitude) = BMP y=128, right column x=448 */
+	/* Right column: NES col 28 at 2x = 448, minus 16 scroll = 432 */
 	if (myship.altitude > 3)
-		display_dial_bar (myship.altitude / 4, 448, 129);
+		display_dial_bar (myship.altitude / 4, 432, 129);
 }
 
 void display_cabin_temp (void)
 {
-	/* NES row 27 (cabin temp) = left column x=32, y=113 */
 	if (myship.cabtemp > 3)
-		display_dial_bar (myship.cabtemp / 4, 32, 113);
+		display_dial_bar (myship.cabtemp / 4, 16, 113);
 }
 
 
 void display_laser_temp (void)
 {
-	/* NES row 28 (laser temp) = BMP y=128, left column x=32 */
 	if (laser_temp > 0)
-		display_dial_bar (laser_temp / 4, 32, 129);
+		display_dial_bar (laser_temp / 4, 16, 129);
 }
 
 
@@ -896,9 +890,8 @@ void display_energy (void)
 	e3 = energy > 192 ? 64 : energy - 128;
 	e4 = energy - 192;  	
 	
-	/* NES row 26 (energy) = left column x=32, y=97, single combined bar */
 	if (energy > 3)
-		display_dial_bar (energy / 4, 32, 97);
+		display_dial_bar (energy / 4, 16, 97);
 }
 
 
@@ -926,9 +919,9 @@ void display_flight_climb (void)
 
 void display_fuel (void)
 {
-	/* NES row 23 (fuel) = left column x=32, y=49 */
+	/* NES row 23 (fuel) = left column x=16 (scroll-adjusted), y=49 */
 	if (cmdr.fuel > 0)
-		display_dial_bar ((cmdr.fuel * 64) / myship.max_fuel, 32, 49);
+		display_dial_bar ((cmdr.fuel * 64) / myship.max_fuel, 16, 49);
 }
 
 
