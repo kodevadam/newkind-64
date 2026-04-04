@@ -262,20 +262,17 @@ void gfx_graphics_shutdown(void)
 }
 
 
-/* Internal: acquire a display buffer and RDP-clear it to black. */
+/* Internal: acquire a display buffer and clear it to black. */
 static void acquire_and_clear(void)
 {
 	active_disp = display_get();
 	active_fb = (uint16_t *)active_disp->buffer;
 
-	/* RDP fill: clear ENTIRE display to black at hardware speed (~0.1ms). */
-	rdpq_attach(active_disp, NULL);
-	rdpq_set_mode_fill(RGBA32(0, 0, 0, 0));
-	rdpq_fill_rectangle(0, 0, N64_SCREEN_W, N64_SCREEN_H);
-	rdpq_detach_wait();
-
-	/* Invalidate CPU cache so it doesn't see stale data from prior frames. */
-	data_cache_hit_invalidate(active_fb, N64_SCREEN_W * N64_SCREEN_H * 2);
+	/* Clear via CPU memset. We invalidate cache first to discard any stale
+	 * dirty lines from when this buffer was used 2-3 frames ago, then
+	 * memset fills the cache with clean zeros. */
+	data_cache_hit_writeback_invalidate(active_fb, N64_SCREEN_W * N64_SCREEN_H * 2);
+	memset(active_fb, 0, N64_SCREEN_W * N64_SCREEN_H * 2);
 }
 
 void gfx_acquire_screen(void)
