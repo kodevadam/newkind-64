@@ -268,10 +268,8 @@ static void acquire_and_clear(void)
 	active_disp = display_get();
 	active_fb = (uint16_t *)active_disp->buffer;
 
-	/* Clear via CPU memset. We invalidate cache first to discard any stale
-	 * dirty lines from when this buffer was used 2-3 frames ago, then
-	 * memset fills the cache with clean zeros. */
-	data_cache_hit_writeback_invalidate(active_fb, N64_SCREEN_W * N64_SCREEN_H * 2);
+	/* Display buffers in libdragon are uncached - writes go directly to
+	 * RDRAM through the CPU write buffer. No cache management needed. */
 	memset(active_fb, 0, N64_SCREEN_W * N64_SCREEN_H * 2);
 }
 
@@ -288,12 +286,11 @@ void gfx_update_screen(void)
 	if (!active_disp)
 		acquire_and_clear();
 
-	/* Flush CPU rendering from cache to RDRAM so the VI can read it. */
-	data_cache_hit_writeback(active_fb, N64_SCREEN_W * N64_SCREEN_H * 2);
+	/* Display buffers are uncached - no cache flush needed.
+	 * Just show and acquire the next buffer. */
 	display_show(active_disp);
 
-	/* Immediately acquire next buffer so active_fb is ALWAYS valid.
-	 * This eliminates NULL checks throughout the renderer. */
+	/* Immediately acquire next buffer so active_fb is ALWAYS valid. */
 	acquire_and_clear();
 }
 
