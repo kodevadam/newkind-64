@@ -60,6 +60,7 @@ int add_new_ship (int ship_type, int x, int y, int z, struct vector *rotmat, int
 void add_new_station (double sx, double sy, double sz, Matrix rotmat);
 void remove_ship (int un);
 void move_univ_object (struct univ_object *obj);
+extern int universe_render_only;
 void update_universe (void);
 
 void update_console (void);

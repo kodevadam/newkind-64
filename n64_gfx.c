@@ -24,9 +24,11 @@
 /* The 256-color palette, stored as RGBA5551 for direct write */
 static uint16_t palette_rgba16[256];
 
-/* Private framebuffer - always consistent, no flicker.
- * Aligned to 16 bytes for optimal DMA/cache line operations. */
-static uint16_t framebuf[N64_SCREEN_W * N64_SCREEN_H] __attribute__((aligned(16)));
+/* Active framebuffer pointer - points to current display surface.
+ * Set by gfx_acquire_screen(), cleared by gfx_update_screen().
+ * All rendering functions write through this pointer. */
+static uint16_t *active_fb;
+static surface_t *active_disp;
 
 volatile int frame_count;
 static timer_link_t *frame_timer_handle;
@@ -185,16 +187,18 @@ static void frame_timer_callback(int ovfl)
 static inline void fb_putpixel(int x, int y, int col)
 {
 	if (x >= clip_tx && x <= clip_bx && y >= clip_ty && y <= clip_by)
-		framebuf[y * N64_SCREEN_W + x] = palette_rgba16[col];
+		active_fb[y * N64_SCREEN_W + x] = palette_rgba16[col];
 }
 
 /* Fast pixel set without clipping (for internal use) */
 static inline void fb_putpixel_fast(int x, int y, int col)
 {
 	if (x >= 0 && x < N64_SCREEN_W && y >= 0 && y < N64_SCREEN_H)
-		framebuf[y * N64_SCREEN_W + x] = palette_rgba16[col];
+		active_fb[y * N64_SCREEN_W + x] = palette_rgba16[col];
 }
 
+
+static void acquire_and_clear(void);
 
 /* Widescreen flag from boot menu */
 extern int n64_widescreen;
@@ -221,8 +225,8 @@ int gfx_graphics_startup(void)
 		}
 	}
 
-	/* Clear framebuffer */
-	memset(framebuf, 0, N64_SCREEN_W * N64_SCREEN_H * 2);
+	active_fb = NULL;
+	active_disp = NULL;
 
 	/* Set default clip region to full screen */
 	clip_tx = 0;
@@ -230,13 +234,12 @@ int gfx_graphics_startup(void)
 	clip_bx = N64_SCREEN_W - 1;
 	clip_by = N64_SCREEN_H - 1;
 
-	/* Draw initial scanner from the loaded BMP */
-	gfx_draw_scanner();
+	/* Acquire first display buffer - after this, active_fb is always valid. */
+	acquire_and_clear();
 
-	/* Draw border lines around the view area */
-	gfx_draw_line(0, 0, 0, 384);
-	gfx_draw_line(0, 0, 511, 0);
-	gfx_draw_line(511, 0, 511, 384);
+	/* Draw initial scanner and borders for the first frame. */
+	gfx_draw_scanner();
+	gfx_draw_borders();
 
 	/* Setup frame timer for game speed regulation */
 	frame_count = 0;
@@ -257,63 +260,55 @@ void gfx_graphics_shutdown(void)
 }
 
 
-/*
- * Blit the 8-bit indexed framebuffer to the N64 16-bit display.
- */
-/*
- * Fast 64-bit framebuffer copy. MIPS64 can store 8 bytes per cycle.
- * 640*480*2 = 614400 bytes / 8 = 76800 stores = ~2ms at 93.75MHz.
- */
-static void fast_framebuf_copy(void *dst, const void *src, int nbytes)
+/* Internal: acquire a display buffer and RDP-clear it to black. */
+static void acquire_and_clear(void)
 {
-	const uint64_t *s = (const uint64_t *)src;
-	uint64_t *d = (uint64_t *)dst;
-	int n = nbytes / 64; /* process 64 bytes (8 uint64s) per iteration */
-	int i;
+	active_disp = display_get();
+	active_fb = (uint16_t *)active_disp->buffer;
 
-	for (i = 0; i < n; i++)
-	{
-		uint64_t a = s[0], b = s[1], c = s[2], d0 = s[3];
-		uint64_t e = s[4], f = s[5], g = s[6], h = s[7];
-		d[0] = a; d[1] = b; d[2] = c; d[3] = d0;
-		d[4] = e; d[5] = f; d[6] = g; d[7] = h;
-		s += 8;
-		d += 8;
-	}
+	/* RDP fill: clear ENTIRE display to black at hardware speed (~0.1ms). */
+	rdpq_attach(active_disp, NULL);
+	rdpq_set_mode_fill(RGBA32(0, 0, 0, 0));
+	rdpq_fill_rectangle(0, 0, N64_SCREEN_W, N64_SCREEN_H);
+	rdpq_detach_wait();
+
+	/* Invalidate CPU cache so it doesn't see stale data from prior frames. */
+	data_cache_hit_invalidate(active_fb, N64_SCREEN_W * N64_SCREEN_H * 2);
+}
+
+void gfx_acquire_screen(void)
+{
+	/* Idempotent - safe to call multiple times per frame. */
+	if (active_disp)
+		return;
+	acquire_and_clear();
 }
 
 void gfx_update_screen(void)
 {
-	surface_t *disp;
+	if (!active_disp)
+		acquire_and_clear();
 
-	/* display_get() blocks until a buffer is free (vsync-locked).
-	 * Frame timing is now handled in the game loop via frame_count. */
-	disp = display_get();
+	/* Flush CPU rendering from cache to RDRAM so the VI can read it. */
+	data_cache_hit_writeback(active_fb, N64_SCREEN_W * N64_SCREEN_H * 2);
+	display_show(active_disp);
 
-	/* Flush framebuf from cache, then fast-copy to display surface */
-	data_cache_hit_writeback(framebuf, sizeof(framebuf));
-	fast_framebuf_copy(disp->buffer, framebuf, N64_SCREEN_W * N64_SCREEN_H * 2);
-
-	display_show(disp);
-}
-
-
-void gfx_acquire_screen(void)
-{
-	/* No-op on N64 - we render to our own buffer */
+	/* Immediately acquire next buffer so active_fb is ALWAYS valid.
+	 * This eliminates NULL checks throughout the renderer. */
+	acquire_and_clear();
 }
 
 
 void gfx_release_screen(void)
 {
-	/* No-op on N64 */
+	/* No-op on N64 - release is handled by gfx_update_screen */
 }
 
 
 void gfx_fast_plot_pixel(int x, int y, int col)
 {
 	/* No bounds check - caller is responsible. Used by planet renderer. */
-	framebuf[y * N64_SCREEN_W + x] = palette_rgba16[col];
+	active_fb[y * N64_SCREEN_W + x] = palette_rgba16[col];
 }
 
 
@@ -354,7 +349,7 @@ void gfx_draw_filled_circle(int cx, int cy, int radius, int circle_colour)
 				if (sx <= ex)
 				{
 					uint16_t c16 = palette_rgba16[circle_colour];
-					uint16_t *row = &framebuf[py * N64_SCREEN_W + sx];
+					uint16_t *row = &active_fb[py * N64_SCREEN_W + sx];
 					int len = ex - sx + 1;
 					if ((((uintptr_t)row) & 2) && len > 0) { *row++ = c16; len--; }
 					{
@@ -454,7 +449,7 @@ static void draw_hline(int x1, int x2, int y, int col)
 	if (x1 > x2) return;
 
 	c16 = palette_rgba16[col];
-	row = &framebuf[y * N64_SCREEN_W];
+	row = &active_fb[y * N64_SCREEN_W];
 
 	/* Align to 32-bit boundary */
 	if ((x1 & 1) && x1 <= x2)
@@ -488,7 +483,7 @@ static void draw_vline(int x, int y1, int y2, int col)
 	if (y2 > clip_by) y2 = clip_by;
 	c16 = palette_rgba16[col];
 	for (; y1 <= y2; y1++)
-		framebuf[y1 * N64_SCREEN_W + x] = c16;
+		active_fb[y1 * N64_SCREEN_W + x] = c16;
 }
 
 
@@ -671,13 +666,15 @@ void gfx_display_centre_text(int y, char *str, int psize, int col)
 }
 
 
-/* Fast zero-fill a region of the 16-bit framebuffer using 64-bit stores */
+/* Fast zero-fill a region of the display buffer.
+ * Since gfx_acquire_screen() already RDP-clears the full screen,
+ * this is mainly used for mid-frame partial clears. */
 static void fast_clear_region(int x1, int y1, int x2, int y2)
 {
 	int y;
 	int w_bytes = (x2 - x1 + 1) * 2;
 	for (y = y1; y <= y2; y++)
-		memset(&framebuf[y * N64_SCREEN_W + x1], 0, w_bytes);
+		memset(&active_fb[y * N64_SCREEN_W + x1], 0, w_bytes);
 }
 
 void gfx_clear_display(void)
@@ -774,7 +771,7 @@ void gfx_draw_scanner(void)
 		{
 			dst_x = GFX_X_OFFSET + x;
 			if (dst_x >= N64_SCREEN_W) break;
-			framebuf[dst_y * N64_SCREEN_W + dst_x] = palette_rgba16[scanner_pixels[y * scanner_w + x]];
+			active_fb[dst_y * N64_SCREEN_W + dst_x] = palette_rgba16[scanner_pixels[y * scanner_w + x]];
 		}
 	}
 
@@ -796,6 +793,16 @@ void gfx_set_clip_region(int tx, int ty, int bx, int by)
 	if (clip_ty < 0) clip_ty = 0;
 	if (clip_bx >= N64_SCREEN_W) clip_bx = N64_SCREEN_W - 1;
 	if (clip_by >= N64_SCREEN_H) clip_by = N64_SCREEN_H - 1;
+}
+
+
+void gfx_draw_borders(void)
+{
+	/* Border lines around the view area - must be redrawn each frame
+	 * since there's no persistent framebuffer. */
+	gfx_draw_line(0, 0, 0, 384);
+	gfx_draw_line(0, 0, 511, 0);
+	gfx_draw_line(511, 0, 511, 384);
 }
 
 
@@ -975,7 +982,7 @@ void gfx_polygon(int num_points, int *poly_list, int face_colour)
 			if (sx <= ex)
 				{
 					uint16_t c16 = palette_rgba16[face_colour];
-					uint16_t *row = &framebuf[i * N64_SCREEN_W + sx];
+					uint16_t *row = &active_fb[i * N64_SCREEN_W + sx];
 					int len = ex - sx + 1;
 					/* 32-bit fill for speed */
 					if ((((uintptr_t)row) & 2) && len > 0) { *row++ = c16; len--; }

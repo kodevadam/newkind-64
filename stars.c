@@ -24,6 +24,10 @@
 
 int warp_stars;
 
+/* Speed scaling for smooth starfield at higher frame rates.
+ * Set to 1.0/N when running starfield at Nx the simulation rate. */
+double star_delta_scale = 1.0;
+
 struct star
 {
 	double x;
@@ -66,13 +70,18 @@ void front_starfield (void)
 	
 	nstars = witchspace ? 3 : 12;
 
-	delta = warp_stars ? 50 : flight_speed;	
+	delta = warp_stars ? 50 : flight_speed;
 	alpha = (double)flight_roll;
 	beta = (double)flight_climb;
 
 	alpha /= 256.0;
 	delta /= 2.0;
-	
+
+	/* Scale for smooth interpolation at higher frame rates */
+	delta *= star_delta_scale;
+	alpha *= star_delta_scale;
+	beta *= star_delta_scale;
+
 	for (i = 0; i < nstars; i++)
 	{
 		/* Plot the stars in their current locations... */
@@ -162,13 +171,17 @@ void rear_starfield (void)
 	
 	nstars = witchspace ? 3 : 12;
 
-	delta = warp_stars ? 50 : flight_speed;	
+	delta = warp_stars ? 50 : flight_speed;
 	alpha = -flight_roll;
 	beta = -flight_climb;
 
 	alpha /= 256.0;
 	delta /= 2.0;
-	
+
+	delta *= star_delta_scale;
+	alpha *= star_delta_scale;
+	beta *= star_delta_scale;
+
 	for (i = 0; i < nstars; i++)
 	{
 		/* Plot the stars in their current locations... */
@@ -271,7 +284,7 @@ void side_starfield (void)
 	
 	nstars = witchspace ? 3 : 12;
 	
-	delta = warp_stars ? 50 : flight_speed;	
+	delta = warp_stars ? 50 : flight_speed;
 	alpha = flight_roll;
 	beta = flight_climb;
 
@@ -280,8 +293,12 @@ void side_starfield (void)
 		delta = -delta;
 		alpha = -alpha;
 		beta = -beta;
-	} 
-	
+	}
+
+	delta *= star_delta_scale;
+	alpha *= star_delta_scale;
+	beta *= star_delta_scale;
+
 	for (i = 0; i < nstars; i++)
 	{
 		sy = stars[i].y;

@@ -572,7 +572,13 @@ void switch_to_view (struct univ_object *flip)
 
 /*
  * Update all the objects in the universe and render them.
+ *
+ * When universe_render_only is set, simulation (AI, movement, collisions)
+ * is skipped but all ships are still rendered at their current positions.
+ * This allows 60fps rendering while simulation runs at a lower rate.
  */
+
+int universe_render_only = 0;
 
 void update_universe (void)
 {
@@ -581,64 +587,69 @@ void update_universe (void)
 	int bounty;
 	char str[80];
 	struct univ_object flip;
-	
-	
+	int sim = !universe_render_only;
+
+
 	gfx_start_render();
-				 	
+
 	for (i = 0; i < MAX_UNIV_OBJECTS; i++)
 	{
 		type = universe[i].type;
-		
+
 		if (type != 0)
 		{
-			if (universe[i].flags & FLG_REMOVE)
+			if (sim && (universe[i].flags & FLG_REMOVE))
 			{
 				if (!(universe[i].flags & FLG_TARGET))
 					cmdr.legal_status |= 64;
-			
+
 				bounty = ship_list[type]->bounty;
-				
+
 				if ((bounty != 0) && (!witchspace))
 				{
 					cmdr.credits += bounty;
 					sprintf (str, "Bounty: %d.%d CR", bounty / 10, bounty % 10);
 					info_message (str);
 				}
-				
+
 				remove_ship (i);
 				continue;
 			}
 
-			if ((detonate_bomb) && ((universe[i].flags & FLG_DEAD) == 0) &&
-				(type != SHIP_PLANET) && (type != SHIP_SUN) &&
-				(type != SHIP_CONSTRICTOR) && (type != SHIP_COUGAR) &&
-				(type != SHIP_CORIOLIS) && (type != SHIP_DODEC))
+			if (sim)
 			{
-				snd_play_sample (SND_EXPLODE);
-				universe[i].flags |= FLG_DEAD;		
-			}
+				if ((detonate_bomb) && ((universe[i].flags & FLG_DEAD) == 0) &&
+					(type != SHIP_PLANET) && (type != SHIP_SUN) &&
+					(type != SHIP_CONSTRICTOR) && (type != SHIP_COUGAR) &&
+					(type != SHIP_CORIOLIS) && (type != SHIP_DODEC))
+				{
+					snd_play_sample (SND_EXPLODE);
+					universe[i].flags |= FLG_DEAD;
+				}
 
-			if ((current_screen != SCR_INTRO_ONE) &&
-				(current_screen != SCR_INTRO_TWO) &&
-				(current_screen != SCR_GAME_OVER) &&
-				(current_screen != SCR_ESCAPE_POD))
-			{
-				tactics (i);
-			} 
-		
-			move_univ_object (&universe[i]);
+				if ((current_screen != SCR_INTRO_ONE) &&
+					(current_screen != SCR_INTRO_TWO) &&
+					(current_screen != SCR_GAME_OVER) &&
+					(current_screen != SCR_ESCAPE_POD))
+				{
+					tactics (i);
+				}
+
+				move_univ_object (&universe[i]);
+			}
 
 			flip = universe[i];
 			switch_to_view (&flip);
-			
+
 			if (type == SHIP_PLANET)
 			{
-				if ((ship_count[SHIP_CORIOLIS] == 0) &&
+				if (sim &&
+					(ship_count[SHIP_CORIOLIS] == 0) &&
 					(ship_count[SHIP_DODEC] == 0) &&
-					(universe[i].distance < 65792)) // was 49152
+					(universe[i].distance < 65792))
 				{
 					make_station_appear();
-				}				
+				}
 
 				draw_ship (&flip);
 				continue;
@@ -649,41 +660,46 @@ void update_universe (void)
 				draw_ship (&flip);
 				continue;
 			}
-			
-			
+
+
 			if (universe[i].distance < 170)
 			{
-				if ((type == SHIP_CORIOLIS) || (type == SHIP_DODEC))
-					check_docking (i);
-				else
-					scoop_item(i);
-				
+				if (sim)
+				{
+					if ((type == SHIP_CORIOLIS) || (type == SHIP_DODEC))
+						check_docking (i);
+					else
+						scoop_item(i);
+				}
 				continue;
 			}
 
 			if (universe[i].distance > 57344)
 			{
-				remove_ship (i);
+				if (sim) remove_ship (i);
 				continue;
 			}
 
 			draw_ship (&flip);
 
-			universe[i].flags = flip.flags;
-			universe[i].exp_seed = flip.exp_seed;
-			universe[i].exp_delta = flip.exp_delta;
-			
-			universe[i].flags &= ~FLG_FIRING;
-			
-			if (universe[i].flags & FLG_DEAD)
-				continue;
+			if (sim)
+			{
+				universe[i].flags = flip.flags;
+				universe[i].exp_seed = flip.exp_seed;
+				universe[i].exp_delta = flip.exp_delta;
 
-			check_target (i, &flip);
+				universe[i].flags &= ~FLG_FIRING;
+
+				if (universe[i].flags & FLG_DEAD)
+					continue;
+
+				check_target (i, &flip);
+			}
 		}
 	}
 
 	gfx_finish_render();
-	detonate_bomb = 0;
+	if (sim) detonate_bomb = 0;
 }
 
 

@@ -210,43 +210,8 @@ static void run_pause_menu(void)
 			}
 		}
 	}
-	/* The pause overlay drew into the persistent framebuf. Restore it by
-	 * redrawing whatever screen was underneath. Flight views are redrawn
-	 * automatically by the game loop; other screens need explicit redraw. */
-	switch (current_screen)
-	{
-		case SCR_GALACTIC_CHART:
-			old_cross_x = -1;
-			display_galactic_chart();
-			break;
-		case SCR_SHORT_RANGE:
-			old_cross_x = -1;
-			display_short_range_chart();
-			break;
-		case SCR_PLANET_DATA:
-			display_data_on_planet();
-			break;
-		case SCR_MARKET_PRICES:
-			display_market_prices();
-			break;
-		case SCR_CMDR_STATUS:
-			display_commander_status();
-			break;
-		case SCR_INVENTORY:
-			display_inventory();
-			break;
-		case SCR_EQUIP_SHIP:
-			equip_ship();
-			break;
-		case SCR_OPTIONS:
-			display_options();
-			break;
-		default:
-			break;
-	}
-	update_console();
-
-	/* Drain accumulated timer ticks so the game doesn't fast-forward */
+	/* No screen redraw needed here - the main loop redraws everything
+	 * every frame since there's no persistent framebuffer. */
 	frame_count = 0;
 	game_paused = 0;
 }
@@ -360,27 +325,6 @@ void draw_cross(int cx, int cy)
 		gfx_set_clip_region(1, 37, 510, 293);
 		gfx_draw_colour_line(cx - 8, cy, cx + 8, cy, GFX_COL_RED);
 		gfx_draw_colour_line(cx, cy - 8, cx, cy + 8, GFX_COL_RED);
-		gfx_set_clip_region(1, 1, 510, 383);
-	}
-}
-
-/* Erase the crosshair by drawing black over it (replaces original XOR erase) */
-static void erase_cross(int cx, int cy)
-{
-	if (current_screen == SCR_SHORT_RANGE)
-	{
-		gfx_set_clip_region(1, 37, 510, 339);
-		gfx_draw_colour_line(cx - 16, cy, cx + 16, cy, GFX_COL_BLACK);
-		gfx_draw_colour_line(cx, cy - 16, cx, cy + 16, GFX_COL_BLACK);
-		gfx_set_clip_region(1, 1, 510, 383);
-		return;
-	}
-
-	if (current_screen == SCR_GALACTIC_CHART)
-	{
-		gfx_set_clip_region(1, 37, 510, 293);
-		gfx_draw_colour_line(cx - 8, cy, cx + 8, cy, GFX_COL_BLACK);
-		gfx_draw_colour_line(cx, cy - 8, cx, cy + 8, GFX_COL_BLACK);
 		gfx_set_clip_region(1, 1, 510, 383);
 	}
 }
@@ -1517,74 +1461,95 @@ int main(void)
 
 		while (!game_over)
 		{
-			/* Always pump audio and push display at vsync rate (~60fps).
-			 * Game logic only runs when the speed_cap timer fires. */
+			/*
+			 * 60fps game loop: render EVERY vsync frame, simulate every Nth.
+			 * gfx_update_screen() shows and immediately acquires the next
+			 * buffer (RDP-cleared to black), so active_fb is always valid.
+			 *
+			 * SIM_RATE=3 → simulation at ~20fps, rendering+starfield at ~60fps.
+			 */
+			#define SIM_RATE 3
+			static int sim_counter = 0;
+			int do_sim;
+
 			snd_update_sound();
 			gfx_update_screen();
 
-			if (frame_count < 1)
-				continue;
-			frame_count--;
-
-			gfx_set_clip_region(1, 1, 510, 383);
-
-			rolling = 0;
-			climbing = 0;
-
-			handle_flight_keys();
-			snd_tick_cooldowns();
-
-			if (game_paused)
-				continue;
-
-			if (message_count > 0)
-				message_count--;
-
-			if (!rolling)
+			do_sim = (frame_count >= 1);
+			if (do_sim)
 			{
-				if (flight_roll > 0)
-					decrease_flight_roll();
-
-				if (flight_roll < 0)
-					increase_flight_roll();
+				frame_count = 0;
+				sim_counter = 0;
+			}
+			else
+			{
+				sim_counter++;
+				if (sim_counter >= SIM_RATE)
+					sim_counter = 0;
 			}
 
-			if (!climbing)
+			/* ===== SIMULATION PHASE (only on sim ticks) ===== */
+			if (do_sim)
 			{
-				if (flight_climb > 0)
-					decrease_flight_climb();
+				gfx_set_clip_region(1, 1, 510, 383);
+				rolling = 0;
+				climbing = 0;
 
-				if (flight_climb < 0)
-					increase_flight_climb();
+				handle_flight_keys();
+				snd_tick_cooldowns();
+
+				if (game_paused)
+					continue;
+
+				if (message_count > 0)
+					message_count--;
+
+				if (!rolling)
+				{
+					if (flight_roll > 0) decrease_flight_roll();
+					if (flight_roll < 0) increase_flight_roll();
+				}
+
+				if (!climbing)
+				{
+					if (flight_climb > 0) decrease_flight_climb();
+					if (flight_climb < 0) increase_flight_climb();
+				}
+
+				if (!docked && auto_pilot)
+				{
+					auto_dock();
+					if ((mcount & 127) == 0)
+						info_message("Docking Computers On");
+				}
 			}
 
+			/* ===== RENDER PHASE (every frame) ===== */
+
+			/* Set starfield speed: 1/SIM_RATE for smooth 60fps motion */
+			star_delta_scale = 1.0 / SIM_RATE;
+			universe_render_only = !do_sim;
 
 			if (!docked)
 			{
-				gfx_acquire_screen();
+				gfx_set_clip_region(1, 1, 510, 383);
 
 				if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) ||
 					(current_screen == SCR_LEFT_VIEW) || (current_screen == SCR_RIGHT_VIEW) ||
 					(current_screen == SCR_INTRO_ONE) || (current_screen == SCR_INTRO_TWO) ||
 					(current_screen == SCR_GAME_OVER))
 				{
-					gfx_clear_display();
+					/* Display already RDP-cleared by gfx_update_screen */
 					update_starfield();
-				}
-
-				if (auto_pilot)
-				{
-					auto_dock();
-					if ((mcount & 127) == 0)
-						info_message("Docking Computers On");
 				}
 
 				update_universe();
 
 				if (docked)
 				{
+					/* Auto-docked during sim */
+					gfx_draw_borders();
 					update_console();
-					gfx_release_screen();
 					continue;
 				}
 
@@ -1594,7 +1559,7 @@ int main(void)
 					if (draw_lasers)
 					{
 						draw_laser_lines();
-						draw_lasers--;
+						if (do_sim) draw_lasers--;
 					}
 
 					draw_laser_sights();
@@ -1606,67 +1571,101 @@ int main(void)
 				if (hyper_ready)
 				{
 					display_hyper_status();
-					if ((mcount & 3) == 0)
-					{
+					if (do_sim && (mcount & 3) == 0)
 						countdown_hyperspace();
-					}
 				}
 
-				gfx_release_screen();
-
-				mcount--;
-				if (mcount < 0)
-					mcount = 255;
-
-				if ((mcount & 7) == 0)
-					regenerate_shields();
-
-				if ((mcount & 31) == 10)
+				/* Simulation-only updates */
+				if (do_sim)
 				{
-					if (energy < 50)
+					mcount--;
+					if (mcount < 0) mcount = 255;
+
+					if ((mcount & 7) == 0) regenerate_shields();
+
+					if ((mcount & 31) == 10)
 					{
-						info_message("ENERGY LOW");
-						snd_play_sample(SND_BEEP);
+						if (energy < 50)
+						{
+							info_message("ENERGY LOW");
+							snd_play_sample(SND_BEEP);
+						}
+						update_altitude();
 					}
 
-					update_altitude();
+					if ((mcount & 31) == 20)
+						update_cabin_temp();
+
+					if ((mcount == 0) && (!witchspace))
+						random_encounter();
+
+					cool_laser();
+					time_ecm();
 				}
 
-				if ((mcount & 31) == 20)
-					update_cabin_temp();
+				gfx_draw_borders();
+				update_console();
+			}
+			else
+			{
+				/* Docked: redraw current screen every frame (no persistent framebuf) */
+				gfx_set_clip_region(1, 1, 510, 383);
+				switch (current_screen)
+				{
+					case SCR_GALACTIC_CHART:
+						display_galactic_chart();
+						break;
+					case SCR_SHORT_RANGE:
+						display_short_range_chart();
+						break;
+					case SCR_PLANET_DATA:
+						display_data_on_planet();
+						break;
+					case SCR_MARKET_PRICES:
+						if (!witchspace) display_market_prices();
+						break;
+					case SCR_CMDR_STATUS:
+						display_commander_status();
+						break;
+					case SCR_INVENTORY:
+						display_inventory();
+						break;
+					case SCR_EQUIP_SHIP:
+						equip_ship();
+						break;
+					case SCR_OPTIONS:
+						display_options();
+						break;
+					default:
+						break;
+				}
 
-				if ((mcount == 0) && (!witchspace))
-					random_encounter();
-
-				cool_laser();
-				time_ecm();
-
+				gfx_draw_borders();
 				update_console();
 			}
 
-			if (current_screen == SCR_BREAK_PATTERN)
+			if (do_sim && current_screen == SCR_BREAK_PATTERN)
 				display_break_pattern();
 
-			if (cross_timer > 0)
+			/* Cross handling - no need to erase (screen is cleared each frame) */
+			if (do_sim)
 			{
-				cross_timer--;
-				if (cross_timer == 0)
+				if (cross_timer > 0)
 				{
-					show_distance_to_planet();
+					cross_timer--;
+					if (cross_timer == 0)
+						show_distance_to_planet();
+				}
+
+				if ((cross_x != old_cross_x) || (cross_y != old_cross_y))
+				{
+					old_cross_x = cross_x;
+					old_cross_y = cross_y;
 				}
 			}
 
-			if ((cross_x != old_cross_x) ||
-				(cross_y != old_cross_y))
-			{
-				if (old_cross_x != -1)
-					erase_cross(old_cross_x, old_cross_y);
-
-				old_cross_x = cross_x;
-				old_cross_y = cross_y;
-
+			if (old_cross_x != -1)
 				draw_cross(old_cross_x, old_cross_y);
-			}
 		}
 
 		if (game_over < 2)
