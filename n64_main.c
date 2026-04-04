@@ -125,24 +125,28 @@ static void run_pause_menu(void)
 		gfx_release_screen();
 		gfx_update_screen();
 
-		kbd_poll_keyboard();
+		/* Use edge-triggered input for menu navigation (not held state)
+		 * to prevent the menu from scrolling too fast. */
+		joypad_poll();
+		{
+			joypad_buttons_t pressed = joypad_get_buttons_pressed(JOYPAD_PORT_1);
 
-		if (kbd_up_pressed)
-		{
-			selection--;
-			if (selection < 0) selection = PAUSE_ITEMS - 1;
-		}
-		if (kbd_down_pressed)
-		{
-			selection++;
-			if (selection >= PAUSE_ITEMS) selection = 0;
-		}
+			if (pressed.d_up)
+			{
+				selection--;
+				if (selection < 0) selection = PAUSE_ITEMS - 1;
+			}
+			if (pressed.d_down)
+			{
+				selection++;
+				if (selection >= PAUSE_ITEMS) selection = 0;
+			}
 
-		if (kbd_resume_pressed) /* Start pressed again = resume */
-		{
-			done = 1;
-		}
-		else if (kbd_enter_pressed || kbd_y_pressed) /* A button = confirm */
+			if (pressed.start) /* Start pressed again = resume */
+			{
+				done = 1;
+			}
+			else if (pressed.a) /* A button = confirm */
 		{
 			switch (selection)
 			{
@@ -177,7 +181,10 @@ static void run_pause_menu(void)
 					return;
 				case 7:  /* Equip Ship */
 					done = 1; game_paused = 0;
-					if (docked) equip_ship();
+					if (docked)
+						equip_ship();
+					else
+						info_message("Must be docked to equip");
 					return;
 				case 8:  /* Options */
 					done = 1; game_paused = 0;
@@ -185,15 +192,32 @@ static void run_pause_menu(void)
 					return;
 				case 9:  /* Hyperspace */
 					done = 1; game_paused = 0;
-					if (!docked) start_hyperspace();
+					if (!docked)
+						start_hyperspace();
 					return;
 				case 10: /* Docking Computer */
 					done = 1; game_paused = 0;
 					if (!docked && cmdr.docking_computer)
-						engage_auto_pilot();
+					{
+						if ((universe[1].type == SHIP_CORIOLIS ||
+						     universe[1].type == SHIP_DODEC) &&
+						    (universe[1].flags & FLG_ANGRY))
+							info_message("Docking permission refused");
+						else if (instant_dock)
+							engage_docking_computer();
+						else
+							engage_auto_pilot();
+					}
+					else if (docked)
+						info_message("Already docked");
+					else
+						info_message("Docking computer not fitted");
 					return;
 				case 11: /* Find Planet */
 					done = 1; game_paused = 0;
+					/* Navigate to galactic chart first, then activate find */
+					old_cross_x = -1;
+					display_galactic_chart();
 					find_input = 1;
 					*find_name = '\0';
 					gfx_clear_text_area();
@@ -201,7 +225,10 @@ static void run_pause_menu(void)
 					return;
 				case 12: /* Save Commander */
 					done = 1; game_paused = 0;
-					if (docked) save_commander_screen();
+					if (docked)
+						save_commander_screen();
+					else
+						info_message("Must be docked to save");
 					return;
 				case 13: /* Quit Game */
 					done = 1; game_paused = 0;
@@ -209,9 +236,9 @@ static void run_pause_menu(void)
 					return;
 			}
 		}
+	} /* end joypad pressed block */
 	}
-	/* No screen redraw needed here - the main loop redraws everything
-	 * every frame since there's no persistent framebuffer. */
+	/* No screen redraw needed here */
 	frame_count = 0;
 	game_paused = 0;
 }
@@ -987,6 +1014,63 @@ void handle_flight_keys(void)
 
 	if (find_input)
 	{
+#ifdef PLATFORM_N64
+		/* N64 virtual keyboard: D-pad Up/Down cycles letters, A confirms, B deletes/cancels */
+		static int find_letter = 0; /* 0-25 = A-Z */
+
+		if (kbd_up_pressed)
+		{
+			find_letter = (find_letter + 1) % 26;
+			/* Show preview of next letter */
+			{
+				char str[40];
+				sprintf(str, "Planet Name? %s%c", find_name, 'A' + find_letter);
+				gfx_clear_text_area();
+				gfx_display_text(16, 340, str);
+			}
+			return;
+		}
+
+		if (kbd_down_pressed)
+		{
+			find_letter = (find_letter + 25) % 26;
+			{
+				char str[40];
+				sprintf(str, "Planet Name? %s%c", find_name, 'A' + find_letter);
+				gfx_clear_text_area();
+				gfx_display_text(16, 340, str);
+			}
+			return;
+		}
+
+		if (kbd_right_pressed)
+		{
+			/* Right = add current letter */
+			add_find_char('A' + find_letter);
+			find_letter = 0;
+			return;
+		}
+
+		if (kbd_enter_pressed)
+		{
+			/* A = search */
+			find_input = 0;
+			find_planet_by_name(find_name);
+			return;
+		}
+
+		if (kbd_backspace_pressed)
+		{
+			if (strlen(find_name) > 0)
+				delete_find_char();
+			else
+			{
+				find_input = 0;
+				gfx_clear_text_area();
+			}
+			return;
+		}
+#else
 		keyasc = kbd_read_key();
 
 		if (kbd_enter_pressed)
@@ -1004,7 +1088,7 @@ void handle_flight_keys(void)
 
 		if (isalpha(keyasc))
 			add_find_char(keyasc);
-
+#endif
 		return;
 	}
 
@@ -1526,8 +1610,8 @@ int main(void)
 				}
 			}
 
-			/* Roll/climb decay runs every frame for smooth response */
-			if (!game_paused)
+			/* Roll/climb decay on sim ticks only (same rate as original) */
+			if (do_sim && !game_paused)
 			{
 				if (!rolling)
 				{

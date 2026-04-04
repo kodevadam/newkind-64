@@ -623,41 +623,19 @@ void render_planet_line (int xo, int yo, int x, int y, int radius, int vx, int v
 	div = radius << 10;
 	if (div == 0) return;
 
-	/* Use 32-bit fixed-point instead of 64-bit multiply where possible.
-	 * For small radii (< 1024), the values fit in 32 bits. */
 	{
 		int inv_div = (1 << 20) / div;
 
-		if (radius < 512)
+		for (; sx <= ex; sx++)
 		{
-			/* Fast 32-bit path: rx and ry fit in ~26 bits, inv_div in ~20 bits.
-			 * Product fits in 32 bits after right-shift. */
-			for (; sx <= ex; sx++)
-			{
-				int lx = (rx >> 4) * (inv_div >> 4) >> 12;
-				int ly = (ry >> 4) * (inv_div >> 4) >> 12;
+			int lx = (int)(((long long)rx * inv_div) >> 20);
+			int ly = (int)(((long long)ry * inv_div) >> 20);
 
-				if ((unsigned)lx <= LAND_X_MAX && (unsigned)ly <= LAND_Y_MAX)
-					gfx_fast_plot_pixel(sx, sy, landscape[lx][ly]);
+			if ((unsigned)lx <= LAND_X_MAX && (unsigned)ly <= LAND_Y_MAX)
+				gfx_fast_plot_pixel(sx, sy, landscape[lx][ly]);
 
-				rx += vx;
-				ry += vy;
-			}
-		}
-		else
-		{
-			/* Large radius: need 64-bit multiply for precision */
-			for (; sx <= ex; sx++)
-			{
-				int lx = (int)(((long long)rx * inv_div) >> 20);
-				int ly = (int)(((long long)ry * inv_div) >> 20);
-
-				if ((unsigned)lx <= LAND_X_MAX && (unsigned)ly <= LAND_Y_MAX)
-					gfx_fast_plot_pixel(sx, sy, landscape[lx][ly]);
-
-				rx += vx;
-				ry += vy;
-			}
+			rx += vx;
+			ry += vy;
 		}
 	}
 }
