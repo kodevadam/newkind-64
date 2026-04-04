@@ -21,10 +21,12 @@
 #include "elite.h"
 #include "n64_assets.h"
 
-/* Back-buffer: 8-bit indexed color just like the Allegro version */
-static uint8_t framebuf[N64_SCREEN_W * N64_SCREEN_H];
+/* Back-buffer: 16-bit RGBA5551 - same format as the N64 display.
+ * Drawing functions convert palette index to RGBA5551 on write,
+ * so gfx_update_screen is just a memcpy (no per-pixel conversion). */
+static uint16_t framebuf[N64_SCREEN_W * N64_SCREEN_H];
 
-/* The 256-color palette, stored as RGBA5551 for the N64 framebuffer */
+/* The 256-color palette, stored as RGBA5551 for direct write */
 static uint16_t palette_rgba16[256];
 
 volatile int frame_count;
@@ -179,18 +181,19 @@ static void frame_timer_callback(int ovfl)
 }
 
 
-/* Inline pixel set with bounds checking and clipping */
-static inline void fb_putpixel(int x, int y, uint8_t col)
+/* Inline pixel set with bounds checking and clipping.
+ * Converts palette index to RGBA5551 on write. */
+static inline void fb_putpixel(int x, int y, int col)
 {
 	if (x >= clip_tx && x <= clip_bx && y >= clip_ty && y <= clip_by)
-		framebuf[y * N64_SCREEN_W + x] = col;
+		framebuf[y * N64_SCREEN_W + x] = palette_rgba16[col];
 }
 
 /* Fast pixel set without clipping (for internal use) */
-static inline void fb_putpixel_fast(int x, int y, uint8_t col)
+static inline void fb_putpixel_fast(int x, int y, int col)
 {
 	if (x >= 0 && x < N64_SCREEN_W && y >= 0 && y < N64_SCREEN_H)
-		framebuf[y * N64_SCREEN_W + x] = col;
+		framebuf[y * N64_SCREEN_W + x] = palette_rgba16[col];
 }
 
 
@@ -263,7 +266,6 @@ void gfx_graphics_shutdown(void)
 void gfx_update_screen(void)
 {
 	surface_t *disp;
-	int y;
 
 	/* Wait for frame timing */
 	while (frame_count < 1)
@@ -272,34 +274,10 @@ void gfx_update_screen(void)
 
 	disp = display_get();
 
-	/*
-	 * Convert 8-bit indexed framebuffer to 16-bit RGBA5551.
-	 * Only convert the 512-pixel-wide active area (skip black borders).
-	 * Use uncached writes to avoid polluting the data cache.
-	 */
-	{
-		/* Get uncached pointer to display buffer for write-combining */
-		uint16_t *pixels_uncached = (uint16_t *)UncachedAddr(disp->buffer);
-		const uint16_t *pal = palette_rgba16;
-		const int stride = disp->stride / 2;
-		const int x_start = GFX_X_OFFSET;
-		const int active_w = 512;
-
-		for (y = 0; y < N64_SCREEN_H; y++)
-		{
-			const uint8_t *src = &framebuf[y * N64_SCREEN_W + x_start];
-			uint16_t *dst = &pixels_uncached[y * stride + x_start];
-			int x;
-
-			for (x = 0; x < active_w; x += 4)
-			{
-				dst[x]   = pal[src[x]];
-				dst[x+1] = pal[src[x+1]];
-				dst[x+2] = pal[src[x+2]];
-				dst[x+3] = pal[src[x+3]];
-			}
-		}
-	}
+	/* Framebuffer is already in RGBA5551 format - just copy directly.
+	 * Use data_cache_hit_writeback to flush our writes, then memcpy. */
+	data_cache_hit_writeback(framebuf, sizeof(framebuf));
+	memcpy(disp->buffer, framebuf, N64_SCREEN_W * N64_SCREEN_H * 2);
 
 	display_show(disp);
 }
@@ -320,7 +298,7 @@ void gfx_release_screen(void)
 void gfx_fast_plot_pixel(int x, int y, int col)
 {
 	/* No bounds check - caller is responsible. Used by planet renderer. */
-	framebuf[y * N64_SCREEN_W + x] = col;
+	framebuf[y * N64_SCREEN_W + x] = palette_rgba16[col];
 }
 
 
@@ -332,7 +310,7 @@ void gfx_plot_pixel(int x, int y, int col)
 
 void gfx_draw_filled_circle(int cx, int cy, int radius, int circle_colour)
 {
-	int x, y, r2;
+	int y, r2;
 
 	cx += GFX_X_OFFSET;
 	cy += GFX_Y_OFFSET;
@@ -359,7 +337,12 @@ void gfx_draw_filled_circle(int cx, int cy, int radius, int circle_colour)
 				if (sx < clip_tx) sx = clip_tx;
 				if (ex > clip_bx) ex = clip_bx;
 				if (sx <= ex)
-					memset(&framebuf[py * N64_SCREEN_W + sx], circle_colour, ex - sx + 1);
+				{
+					uint16_t c16 = palette_rgba16[circle_colour];
+					int xx;
+					for (xx = sx; xx <= ex; xx++)
+						framebuf[py * N64_SCREEN_W + xx] = c16;
+				}
 			}
 		}
 	}
@@ -401,7 +384,7 @@ void gfx_draw_circle(int cx, int cy, int radius, int circle_colour)
 
 
 /* Bresenham line drawing */
-static void draw_line_clipped(int x1, int y1, int x2, int y2, uint8_t col)
+static void draw_line_clipped(int x1, int y1, int x2, int y2, int col)
 {
 	int dx = abs(x2 - x1);
 	int dy = abs(y2 - y1);
@@ -430,29 +413,34 @@ static void draw_line_clipped(int x1, int y1, int x2, int y2, uint8_t col)
 }
 
 
-/* Horizontal line - optimized */
-static void draw_hline(int x1, int x2, int y, uint8_t col)
+/* Horizontal line - 16-bit fill */
+static void draw_hline(int x1, int x2, int y, int col)
 {
-	int tmp;
+	int tmp, i;
+	uint16_t c16;
 	if (x1 > x2) { tmp = x1; x1 = x2; x2 = tmp; }
 	if (y < clip_ty || y > clip_by) return;
 	if (x1 < clip_tx) x1 = clip_tx;
 	if (x2 > clip_bx) x2 = clip_bx;
 	if (x1 > x2) return;
-	memset(&framebuf[y * N64_SCREEN_W + x1], col, x2 - x1 + 1);
+	c16 = palette_rgba16[col];
+	for (i = x1; i <= x2; i++)
+		framebuf[y * N64_SCREEN_W + i] = c16;
 }
 
 
-/* Vertical line - optimized */
-static void draw_vline(int x, int y1, int y2, uint8_t col)
+/* Vertical line - 16-bit fill */
+static void draw_vline(int x, int y1, int y2, int col)
 {
 	int tmp;
+	uint16_t c16;
 	if (y1 > y2) { tmp = y1; y1 = y2; y2 = tmp; }
 	if (x < clip_tx || x > clip_bx) return;
 	if (y1 < clip_ty) y1 = clip_ty;
 	if (y2 > clip_by) y2 = clip_by;
+	c16 = palette_rgba16[col];
 	for (; y1 <= y2; y1++)
-		framebuf[y1 * N64_SCREEN_W + x] = col;
+		framebuf[y1 * N64_SCREEN_W + x] = c16;
 }
 
 
@@ -639,14 +627,14 @@ void gfx_clear_display(void)
 {
 	int y;
 	for (y = GFX_Y_OFFSET + 1; y <= 383 + GFX_Y_OFFSET; y++)
-		memset(&framebuf[y * N64_SCREEN_W + GFX_X_OFFSET + 1], GFX_COL_BLACK, 510);
+		memset(&framebuf[y * N64_SCREEN_W + GFX_X_OFFSET + 1], 0, 510 * 2);
 }
 
 void gfx_clear_text_area(void)
 {
 	int y;
 	for (y = GFX_Y_OFFSET + 340; y <= 383 + GFX_Y_OFFSET; y++)
-		memset(&framebuf[y * N64_SCREEN_W + GFX_X_OFFSET + 1], GFX_COL_BLACK, 510);
+		memset(&framebuf[y * N64_SCREEN_W + GFX_X_OFFSET + 1], 0, 510 * 2);
 }
 
 
@@ -664,7 +652,7 @@ void gfx_clear_area(int tx, int ty, int bx, int by)
 	if (by >= N64_SCREEN_H) by = N64_SCREEN_H - 1;
 
 	for (y = ty; y <= by; y++)
-		memset(&framebuf[y * N64_SCREEN_W + tx], GFX_COL_BLACK, bx - tx + 1);
+		memset(&framebuf[y * N64_SCREEN_W + tx], 0, (bx - tx + 1) * 2);
 }
 
 
@@ -711,7 +699,6 @@ void gfx_draw_scanner(void)
 {
 	int x, y;
 	int dst_x, dst_y;
-	int src_x, src_y;
 
 	if (!scanner_pixels)
 		return;
@@ -735,7 +722,7 @@ void gfx_draw_scanner(void)
 		{
 			dst_x = GFX_X_OFFSET + x;
 			if (dst_x >= N64_SCREEN_W) break;
-			framebuf[dst_y * N64_SCREEN_W + dst_x] = scanner_pixels[y * scanner_w + x];
+			framebuf[dst_y * N64_SCREEN_W + dst_x] = palette_rgba16[scanner_pixels[y * scanner_w + x]];
 		}
 	}
 
@@ -934,7 +921,12 @@ void gfx_polygon(int num_points, int *poly_list, int face_colour)
 			if (sx < clip_tx) sx = clip_tx;
 			if (ex > clip_bx) ex = clip_bx;
 			if (sx <= ex)
-				memset(&framebuf[i * N64_SCREEN_W + sx], face_colour, ex - sx + 1);
+				{
+					uint16_t c16 = palette_rgba16[face_colour];
+					int xx;
+					for (xx = sx; xx <= ex; xx++)
+						framebuf[i * N64_SCREEN_W + xx] = c16;
+				}
 		}
 	}
 }

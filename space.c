@@ -981,8 +981,9 @@ void display_condition(void)
 
 void update_console (void)
 {
+	gfx_set_clip_region (0, 0, 512, 512);
 	gfx_draw_scanner();
-	
+
 	display_speed();
 	display_flight_climb();
 	display_flight_roll();
