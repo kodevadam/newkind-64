@@ -10,6 +10,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include <libdragon.h>
 
@@ -61,15 +62,20 @@ void snd_sound_startup(void)
 	audio_init(16000, 4);
 	mixer_init(SFX_CHANNELS);
 
-	/* Load all sound samples from ROM filesystem */
+	/* Load all sound samples from ROM filesystem.
+	 * Check each file exists before opening to avoid DFS assertions. */
 	for (i = 0; i < NUM_SAMPLES; i++)
 	{
+		FILE *fp;
 		sample_list[i].loaded = 0;
-		/* wav64_open takes the rom:/ path directly */
-		wav64_open(&sample_list[i].wave, sample_list[i].filename);
-		/* If the file doesn't exist, the wav64 struct will be zeroed/invalid
-		 * but won't crash. Mark as loaded optimistically. */
-		sample_list[i].loaded = 1;
+
+		fp = fopen(sample_list[i].filename, "rb");
+		if (fp)
+		{
+			fclose(fp);
+			wav64_open(&sample_list[i].wave, sample_list[i].filename);
+			sample_list[i].loaded = 1;
+		}
 	}
 }
 
@@ -102,11 +108,14 @@ void snd_play_sample(int sample_no)
 
 	sample_list[sample_no].timeleft = sample_list[sample_no].runtime;
 
-	/* Find a free channel (round-robin) */
+	/* Find a free channel (round-robin).
+	 * Stop the channel first to avoid DFS read-past-end assertions
+	 * when overwriting a still-playing sample. */
 	static int next_channel = 0;
 	ch = next_channel;
 	next_channel = (next_channel + 1) % SFX_CHANNELS;
 
+	mixer_ch_stop(ch);
 	mixer_ch_set_vol(ch, 1.0f, 1.0f);
 	wav64_play(&sample_list[sample_no].wave, ch);
 }

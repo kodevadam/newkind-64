@@ -319,7 +319,8 @@ void gfx_release_screen(void)
 
 void gfx_fast_plot_pixel(int x, int y, int col)
 {
-	fb_putpixel_fast(x, y, col);
+	/* No bounds check - caller is responsible. Used by planet renderer. */
+	framebuf[y * N64_SCREEN_W + x] = col;
 }
 
 
@@ -331,21 +332,34 @@ void gfx_plot_pixel(int x, int y, int col)
 
 void gfx_draw_filled_circle(int cx, int cy, int radius, int circle_colour)
 {
-	int x, y;
-	int px, py;
+	int x, y, r2;
 
 	cx += GFX_X_OFFSET;
 	cy += GFX_Y_OFFSET;
 
+	if (radius <= 0) return;
+	r2 = radius * radius;
+
+	/* Scanline fill: for each row, compute the horizontal span */
 	for (y = -radius; y <= radius; y++)
 	{
-		for (x = -radius; x <= radius; x++)
+		/* x range where x*x + y*y <= r*r  =>  x = sqrt(r2 - y*y) */
+		int y2 = y * y;
+		int xspan = 0;
+		while (xspan * xspan + y2 <= r2) xspan++;
+		xspan--;
+
+		/* Draw horizontal line from cx-xspan to cx+xspan */
 		{
-			if (x * x + y * y <= radius * radius)
+			int py = cy + y;
+			int sx = cx - xspan;
+			int ex = cx + xspan;
+			if (py >= clip_ty && py <= clip_by)
 			{
-				px = cx + x;
-				py = cy + y;
-				fb_putpixel(px, py, circle_colour);
+				if (sx < clip_tx) sx = clip_tx;
+				if (ex > clip_bx) ex = clip_bx;
+				if (sx <= ex)
+					memset(&framebuf[py * N64_SCREEN_W + sx], circle_colour, ex - sx + 1);
 			}
 		}
 	}

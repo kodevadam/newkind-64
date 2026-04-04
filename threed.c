@@ -522,7 +522,6 @@ void midpoint_square (int tx, int ty, int w)
 void generate_fractal_landscape (int rnd_seed)
 {
 	int x,y,d,h;
-	double dist;
 	int dark;
 	int old_seed;
 	
@@ -543,6 +542,7 @@ void generate_fractal_landscape (int rnd_seed)
 	{
 		for (x = 0; x <= LAND_X_MAX; x++)
 		{
+			int dist;
 			dist = x*x + y*y;
 			dark = dist > 10000;
 			h = landscape[x][y];
@@ -596,33 +596,43 @@ void render_planet_line (int xo, int yo, int x, int y, int radius, int vx, int v
 	int div;
 
 	sy = y + yo;
-	
+
 	if ((sy < GFX_VIEW_TY + GFX_Y_OFFSET) ||
 		(sy > GFX_VIEW_BY + GFX_Y_OFFSET))
 		return;
-					   
+
 	sx = xo - x;
 	ex = xo + x;
-	
+
 	rx = -x * vx - y * vy;
 	ry = -x * vy + y * vx;
 	rx += radius << 16;
 	ry += radius << 16;
 	div = radius << 10;	 /* radius * 2 * LAND_X_MAX >> 16 */
-	
-		
-	for (; sx <= ex; sx++)
+
+	if (div == 0) return;
+
+	/* Pre-compute reciprocal to replace per-pixel division with multiply+shift.
+	 * inv_div = (1 << 20) / div. Then lx = (rx * inv_div) >> 20. */
 	{
-		if ((sx >= (GFX_VIEW_TX + GFX_X_OFFSET)) && (sx <= (GFX_VIEW_BX + GFX_X_OFFSET)))
+		int inv_div = (1 << 20) / div;
+
+		for (; sx <= ex; sx++)
 		{
-			lx = rx / div;
-			ly = ry / div;
-			colour = landscape[lx][ly];
- 
-			gfx_fast_plot_pixel (sx, sy, colour);
+			if ((sx >= (GFX_VIEW_TX + GFX_X_OFFSET)) && (sx <= (GFX_VIEW_BX + GFX_X_OFFSET)))
+			{
+				lx = (int)(((long long)rx * inv_div) >> 20);
+				ly = (int)(((long long)ry * inv_div) >> 20);
+
+				if (lx >= 0 && lx <= LAND_X_MAX && ly >= 0 && ly <= LAND_Y_MAX)
+				{
+					colour = landscape[lx][ly];
+					gfx_fast_plot_pixel (sx, sy, colour);
+				}
+			}
+			rx += vx;
+			ry += vy;
 		}
-		rx += vx;
-		ry += vy;
 	}
 }
 
