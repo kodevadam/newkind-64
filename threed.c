@@ -724,7 +724,7 @@ void draw_planet (struct univ_object *planet)
 	if ((x + radius <  0) ||
 		(x - radius > 511) ||
 		(y + radius < 0) ||
-		(y - radius > GFX_VIEW_BY))
+		(y - radius > 383))
 		return; 
 
 	switch (planet_render_style)
@@ -862,7 +862,7 @@ void draw_sun (struct univ_object *planet)
 	if ((x + radius <  0) ||
 		(x - radius > 511) ||
 		(y + radius < 0) ||
-		(y - radius > GFX_VIEW_BY))
+		(y - radius > 383))
 		return; 
 
 	render_sun (x, y, radius);

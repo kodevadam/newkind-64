@@ -434,7 +434,7 @@ void display_data_on_planet (void)
 	gfx_display_text (16, 266, str);
 
 	description = describe_planet (hyperspace_planet);
-	gfx_display_pretty_text (16, 298, 400, GFX_VIEW_BY, description);
+	gfx_display_pretty_text (16, 298, 400, 384, description);
 }
 
 
