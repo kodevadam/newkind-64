@@ -653,29 +653,53 @@ void render_planet (int xo, int yo, int radius, struct vector *vec)
 
 	xo += GFX_X_OFFSET;
 	yo += GFX_Y_OFFSET;
-	
+
 	vx = vec[1].x * 65536;
-	vy = vec[1].y * 65536;	
-	
+	vy = vec[1].y * 65536;
+
 	s = radius;
 	x = radius;
 	y = 0;
 
-	s -= x + x;
-	while (y <= x)
+	/* For large planets, render every other scanline to halve cost.
+	 * At 640x480, planets >80px radius are large enough that the
+	 * interlacing is barely noticeable. */
+	if (radius > 80)
 	{
-		render_planet_line (xo, yo, x, y, radius, vx, vy);
-		render_planet_line (xo, yo, x,-y, radius, vx, vy);
-		render_planet_line (xo, yo, y, x, radius, vx, vy);
-		render_planet_line (xo, yo, y,-x, radius, vx, vy);
-		
-		s += y + y + 1;
-		y++;
-		if (s >= 0)
+		s -= x + x;
+		while (y <= x)
 		{
-			s -= x + x + 2;
-			x--;
-		}				
+			render_planet_line (xo, yo, x, y, radius, vx, vy);
+			render_planet_line (xo, yo, x,-y, radius, vx, vy);
+			render_planet_line (xo, yo, y, x, radius, vx, vy);
+			render_planet_line (xo, yo, y,-x, radius, vx, vy);
+
+			/* Skip a line */
+			s += y + y + 1; y++;
+			if (s >= 0) { s -= x + x + 2; x--; }
+
+			s += y + y + 1; y++;
+			if (s >= 0) { s -= x + x + 2; x--; }
+		}
+	}
+	else
+	{
+		s -= x + x;
+		while (y <= x)
+		{
+			render_planet_line (xo, yo, x, y, radius, vx, vy);
+			render_planet_line (xo, yo, x,-y, radius, vx, vy);
+			render_planet_line (xo, yo, y, x, radius, vx, vy);
+			render_planet_line (xo, yo, y,-x, radius, vx, vy);
+
+			s += y + y + 1;
+			y++;
+			if (s >= 0)
+			{
+				s -= x + x + 2;
+				x--;
+			}
+		}
 	}
 }
 
