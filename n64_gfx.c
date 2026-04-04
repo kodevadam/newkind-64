@@ -679,13 +679,13 @@ static void fast_clear_region(int x1, int y1, int x2, int y2)
 void gfx_clear_display(void)
 {
 	fast_clear_region(GFX_X_OFFSET + 1, GFX_Y_OFFSET + 1,
-	                  GFX_X_OFFSET + 510, GFX_Y_OFFSET + 383);
+	                  GFX_X_OFFSET + 510, GFX_Y_OFFSET + GFX_VIEW_BY);
 }
 
 void gfx_clear_text_area(void)
 {
-	fast_clear_region(GFX_X_OFFSET + 1, GFX_Y_OFFSET + 340,
-	                  GFX_X_OFFSET + 510, GFX_Y_OFFSET + 383);
+	fast_clear_region(GFX_X_OFFSET + 1, GFX_Y_OFFSET + GFX_VIEW_BY - 40,
+	                  GFX_X_OFFSET + 510, GFX_Y_OFFSET + GFX_VIEW_BY);
 }
 
 void gfx_clear_area(int tx, int ty, int bx, int by)
