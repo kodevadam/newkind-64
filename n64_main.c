@@ -1077,8 +1077,21 @@ void handle_flight_keys(void)
 		o_pressed();
 
 	if (kbd_pause_pressed) {
-		cheat_arg = 0;
-		game_paused = 1;
+		/* Only open pause menu from flight views - not from submenus/screens
+		 * that were navigated to FROM the pause menu. Opening the pause menu
+		 * on top of other screens creates nested state and crashes. */
+		if (current_screen == SCR_FRONT_VIEW || current_screen == SCR_REAR_VIEW ||
+			current_screen == SCR_LEFT_VIEW || current_screen == SCR_RIGHT_VIEW)
+		{
+			cheat_arg = 0;
+			game_paused = 1;
+		}
+		else
+		{
+			/* From non-flight screens, Start returns to front view */
+			current_screen = SCR_FRONT_VIEW;
+			old_cross_x = -1;
+		}
 	}
 
 	if (kbd_target_missile_pressed)

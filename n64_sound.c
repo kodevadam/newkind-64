@@ -137,7 +137,14 @@ void snd_play_sample(int sample_no)
 	mixer_ch_stop(ch);
 	ch_playing[ch] = -1;
 
-	/* Play the pre-opened sample */
+	/* Close and reopen the wav64 handle to reset the internal file
+	 * position. wav64_play() alone doesn't reliably seek back to the
+	 * start for VADPCM-encoded files, causing "invalid read past end"
+	 * assertions when replaying a sample whose handle reached EOF. */
+	wav64_close(&sample_wave[sample_no]);
+	wav64_open(&sample_wave[sample_no], sample_filenames[sample_no]);
+
+	/* Play the freshly reopened sample */
 	mixer_ch_set_vol(ch, 1.0f, 1.0f);
 	wav64_play(&sample_wave[sample_no], ch);
 	ch_playing[ch] = sample_no;
