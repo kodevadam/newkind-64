@@ -4,8 +4,7 @@
  * Nintendo 64 sound routines using libdragon audio mixer.
  *
  * WAV samples are converted to wav64 format and loaded from
- * the ROM filesystem (DFS). MIDI is not supported on N64;
- * the theme and Blue Danube are omitted.
+ * the ROM filesystem (DFS). MIDI is not supported on N64.
  */
 
 #include <stdlib.h>
@@ -17,38 +16,42 @@
 #include "sound.h"
 
 #define NUM_SAMPLES 14
+#define NUM_CHANNELS 4
 
 static int sound_on;
 
-struct sound_sample
-{
-	wav64_t wave;
-	char filename[64];
-	int loaded;
-	int runtime;
-	int timeleft;
+static const char *sample_filenames[NUM_SAMPLES] = {
+	"rom:/launch.wav64",
+	"rom:/crash.wav64",
+	"rom:/dock.wav64",
+	"rom:/gameover.wav64",
+	"rom:/pulse.wav64",
+	"rom:/hitem.wav64",
+	"rom:/explode.wav64",
+	"rom:/ecm.wav64",
+	"rom:/missile.wav64",
+	"rom:/hyper.wav64",
+	"rom:/incom1.wav64",
+	"rom:/incom2.wav64",
+	"rom:/beep.wav64",
+	"rom:/boop.wav64",
 };
 
-static struct sound_sample sample_list[NUM_SAMPLES] =
-{
-	{ .filename = "rom:/launch.wav64",    .runtime = 32, .timeleft = 0 },
-	{ .filename = "rom:/crash.wav64",     .runtime =  7, .timeleft = 0 },
-	{ .filename = "rom:/dock.wav64",      .runtime = 36, .timeleft = 0 },
-	{ .filename = "rom:/gameover.wav64",  .runtime = 24, .timeleft = 0 },
-	{ .filename = "rom:/pulse.wav64",     .runtime =  4, .timeleft = 0 },
-	{ .filename = "rom:/hitem.wav64",     .runtime =  4, .timeleft = 0 },
-	{ .filename = "rom:/explode.wav64",   .runtime = 23, .timeleft = 0 },
-	{ .filename = "rom:/ecm.wav64",       .runtime = 23, .timeleft = 0 },
-	{ .filename = "rom:/missile.wav64",   .runtime = 25, .timeleft = 0 },
-	{ .filename = "rom:/hyper.wav64",     .runtime = 37, .timeleft = 0 },
-	{ .filename = "rom:/incom1.wav64",    .runtime =  4, .timeleft = 0 },
-	{ .filename = "rom:/incom2.wav64",    .runtime =  5, .timeleft = 0 },
-	{ .filename = "rom:/beep.wav64",      .runtime =  2, .timeleft = 0 },
-	{ .filename = "rom:/boop.wav64",      .runtime =  7, .timeleft = 0 },
+static int sample_runtime[NUM_SAMPLES] = {
+	32, 7, 36, 24, 4, 4, 23, 23, 25, 37, 4, 5, 2, 7
 };
 
-/* Number of mixer channels for sound effects */
-#define SFX_CHANNELS 4
+static int sample_timeleft[NUM_SAMPLES];
+static int sample_exists[NUM_SAMPLES];
+
+/*
+ * Each channel gets its own wav64_t object to avoid DFS file handle
+ * conflicts when the mixer reads audio data asynchronously.
+ * ch_sample[ch] tracks which sample is loaded on each channel (-1 = none).
+ */
+static wav64_t ch_wave[NUM_CHANNELS];
+static int ch_sample[NUM_CHANNELS];
+static int ch_open[NUM_CHANNELS];
 
 
 void snd_sound_startup(void)
@@ -57,35 +60,51 @@ void snd_sound_startup(void)
 
 	sound_on = 1;
 
-	/* Initialize audio at 16000 Hz - low enough for N64 CPU headroom.
-	 * WAV files are resampled to this rate during build via audioconv64. */
 	audio_init(16000, 4);
-	mixer_init(SFX_CHANNELS);
+	mixer_init(NUM_CHANNELS);
 
-	/* Load all sound samples from ROM filesystem.
-	 * Check each file exists before opening to avoid DFS assertions. */
+	/* Check which sample files exist in the ROM filesystem */
 	for (i = 0; i < NUM_SAMPLES; i++)
 	{
-		FILE *fp;
-		sample_list[i].loaded = 0;
-
-		fp = fopen(sample_list[i].filename, "rb");
+		FILE *fp = fopen(sample_filenames[i], "rb");
 		if (fp)
 		{
 			fclose(fp);
-			wav64_open(&sample_list[i].wave, sample_list[i].filename);
-			sample_list[i].loaded = 1;
+			sample_exists[i] = 1;
 		}
+		else
+		{
+			sample_exists[i] = 0;
+		}
+		sample_timeleft[i] = 0;
+	}
+
+	/* Initialize channel tracking */
+	for (i = 0; i < NUM_CHANNELS; i++)
+	{
+		ch_sample[i] = -1;
+		ch_open[i] = 0;
 	}
 }
 
 
 void snd_sound_shutdown(void)
 {
+	int i;
+
 	if (!sound_on)
 		return;
 
-	/* wav64 objects are statically allocated - no close needed */
+	for (i = 0; i < NUM_CHANNELS; i++)
+	{
+		mixer_ch_stop(i);
+		if (ch_open[i])
+		{
+			wav64_close(&ch_wave[i]);
+			ch_open[i] = 0;
+		}
+	}
+
 	sound_on = 0;
 }
 
@@ -93,6 +112,7 @@ void snd_sound_shutdown(void)
 void snd_play_sample(int sample_no)
 {
 	int ch;
+	static int next_channel = 0;
 
 	if (!sound_on)
 		return;
@@ -100,24 +120,36 @@ void snd_play_sample(int sample_no)
 	if (sample_no < 0 || sample_no >= NUM_SAMPLES)
 		return;
 
-	if (!sample_list[sample_no].loaded)
+	if (!sample_exists[sample_no])
 		return;
 
-	if (sample_list[sample_no].timeleft != 0)
+	if (sample_timeleft[sample_no] != 0)
 		return;
 
-	sample_list[sample_no].timeleft = sample_list[sample_no].runtime;
+	sample_timeleft[sample_no] = sample_runtime[sample_no];
 
-	/* Find a free channel (round-robin).
-	 * Stop the channel first to avoid DFS read-past-end assertions
-	 * when overwriting a still-playing sample. */
-	static int next_channel = 0;
+	/* Pick next channel (round-robin) */
 	ch = next_channel;
-	next_channel = (next_channel + 1) % SFX_CHANNELS;
+	next_channel = (next_channel + 1) % NUM_CHANNELS;
 
+	/* Stop whatever is playing on this channel */
 	mixer_ch_stop(ch);
+
+	/* Close previous wav64 on this channel if open */
+	if (ch_open[ch])
+	{
+		wav64_close(&ch_wave[ch]);
+		ch_open[ch] = 0;
+		ch_sample[ch] = -1;
+	}
+
+	/* Open a fresh wav64 handle for this channel */
+	wav64_open(&ch_wave[ch], sample_filenames[sample_no]);
+	ch_open[ch] = 1;
+	ch_sample[ch] = sample_no;
+
 	mixer_ch_set_vol(ch, 1.0f, 1.0f);
-	wav64_play(&sample_list[sample_no].wave, ch);
+	wav64_play(&ch_wave[ch], ch);
 }
 
 
@@ -130,8 +162,8 @@ void snd_update_sound(void)
 
 	for (i = 0; i < NUM_SAMPLES; i++)
 	{
-		if (sample_list[i].timeleft > 0)
-			sample_list[i].timeleft--;
+		if (sample_timeleft[i] > 0)
+			sample_timeleft[i]--;
 	}
 
 	/* Pump the audio mixer */
@@ -146,7 +178,6 @@ void snd_update_sound(void)
 
 void snd_play_midi(int midi_no, int repeat)
 {
-	/* MIDI not supported on N64 */
 	(void)midi_no;
 	(void)repeat;
 }
@@ -154,5 +185,4 @@ void snd_play_midi(int midi_no, int repeat)
 
 void snd_stop_midi(void)
 {
-	/* No-op on N64 */
 }
