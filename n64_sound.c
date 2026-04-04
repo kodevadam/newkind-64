@@ -47,16 +47,6 @@ static int sample_loaded[NUM_SAMPLES];
 /* Track which sample is playing on each channel to avoid conflicts */
 static int ch_playing[NUM_CHANNELS];  /* sample index, or -1 */
 
-/*
- * Audio callback - called by the audio subsystem when it needs more data.
- * This ensures the mixer is pumped at a steady rate regardless of game framerate.
- */
-static void audio_callback(short *buffer, size_t numsamples)
-{
-	mixer_poll(buffer, numsamples);
-}
-
-
 void snd_sound_startup(void)
 {
 	int i;
@@ -87,8 +77,9 @@ void snd_sound_startup(void)
 	for (i = 0; i < NUM_CHANNELS; i++)
 		ch_playing[i] = -1;
 
-	/* Install audio callback for crackle-free playback */
-	audio_set_buffer_callback(audio_callback);
+	/* Note: we use manual mixer_poll in snd_update_sound instead of
+	 * audio_set_buffer_callback because the callback approach was silent
+	 * on real hardware. */
 }
 
 
@@ -166,7 +157,13 @@ void snd_update_sound(void)
 			sample_timeleft[i]--;
 	}
 
-	/* Audio is pumped by the callback - no manual mixer_poll needed here */
+	/* Pump the audio mixer - call multiple times to fill all ready buffers */
+	while (audio_can_write())
+	{
+		short *buf = audio_write_begin();
+		mixer_poll(buf, audio_get_buffer_length());
+		audio_write_end();
+	}
 }
 
 

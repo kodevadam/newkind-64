@@ -24,17 +24,9 @@
 /* The 256-color palette, stored as RGBA5551 for direct write */
 static uint16_t palette_rgba16[256];
 
-/* Active render target - points directly into display surface buffer.
- * This eliminates the 600KB memcpy per frame. Drawing functions write
- * directly to RDRAM that the VI reads from. */
-static uint16_t *framebuf;
-static int framebuf_stride; /* in uint16_t units */
-
-/* Fallback buffer used during init before first display_get */
-static uint16_t init_framebuf[N64_SCREEN_W * N64_SCREEN_H];
-
-/* Currently locked display surface */
-static surface_t *current_disp = NULL;
+/* Private framebuffer - always consistent, no flicker.
+ * Aligned to 16 bytes for optimal DMA/cache line operations. */
+static uint16_t framebuf[N64_SCREEN_W * N64_SCREEN_H] __attribute__((aligned(16)));
 
 volatile int frame_count;
 static timer_link_t *frame_timer_handle;
@@ -220,15 +212,6 @@ int gfx_graphics_startup(void)
 	 * which actually helps with the vertical clipping issue. */
 	display_init(RESOLUTION_640x480, DEPTH_16_BPP, 3, GAMMA_NONE, FILTERS_RESAMPLE);
 
-	/* Use init_framebuf until first display_get in gfx_update_screen */
-	framebuf = init_framebuf;
-	framebuf_stride = N64_SCREEN_W;
-
-	/* Grab first display surface immediately so we can draw into it */
-	current_disp = display_get();
-	framebuf = (uint16_t *)current_disp->buffer;
-	framebuf_stride = current_disp->stride / 2;
-
 	/* Try to load palette from the scanner BMP (the authentic Elite palette) */
 	if (load_scanner_bmp(scanner_filename) != 0)
 	{
@@ -277,26 +260,44 @@ void gfx_graphics_shutdown(void)
 /*
  * Blit the 8-bit indexed framebuffer to the N64 16-bit display.
  */
+/*
+ * Fast 64-bit framebuffer copy. MIPS64 can store 8 bytes per cycle.
+ * 640*480*2 = 614400 bytes / 8 = 76800 stores = ~2ms at 93.75MHz.
+ */
+static void fast_framebuf_copy(void *dst, const void *src, int nbytes)
+{
+	const uint64_t *s = (const uint64_t *)src;
+	uint64_t *d = (uint64_t *)dst;
+	int n = nbytes / 64; /* process 64 bytes (8 uint64s) per iteration */
+	int i;
+
+	for (i = 0; i < n; i++)
+	{
+		uint64_t a = s[0], b = s[1], c = s[2], d0 = s[3];
+		uint64_t e = s[4], f = s[5], g = s[6], h = s[7];
+		d[0] = a; d[1] = b; d[2] = c; d[3] = d0;
+		d[4] = e; d[5] = f; d[6] = g; d[7] = h;
+		s += 8;
+		d += 8;
+	}
+}
+
 void gfx_update_screen(void)
 {
+	surface_t *disp;
+
 	/* Wait for frame timing */
 	while (frame_count < 1)
 		; /* spin */
 	frame_count = 0;
 
-	/* Show the surface we just drew into */
-	if (current_disp)
-	{
-		/* Flush cache so the VI sees our writes */
-		data_cache_hit_writeback(current_disp->buffer,
-			current_disp->stride * N64_SCREEN_H);
-		display_show(current_disp);
-	}
+	disp = display_get();
 
-	/* Grab the next back buffer to draw into */
-	current_disp = display_get();
-	framebuf = (uint16_t *)current_disp->buffer;
-	framebuf_stride = current_disp->stride / 2;
+	/* Flush framebuf from cache, then fast-copy to display surface */
+	data_cache_hit_writeback(framebuf, sizeof(framebuf));
+	fast_framebuf_copy(disp->buffer, framebuf, N64_SCREEN_W * N64_SCREEN_H * 2);
+
+	display_show(disp);
 }
 
 
@@ -356,9 +357,19 @@ void gfx_draw_filled_circle(int cx, int cy, int radius, int circle_colour)
 				if (sx <= ex)
 				{
 					uint16_t c16 = palette_rgba16[circle_colour];
-					int xx;
-					for (xx = sx; xx <= ex; xx++)
-						framebuf[py * N64_SCREEN_W + xx] = c16;
+					uint16_t *row = &framebuf[py * N64_SCREEN_W + sx];
+					int len = ex - sx + 1;
+					if ((((uintptr_t)row) & 2) && len > 0) { *row++ = c16; len--; }
+					{
+						uint32_t c32 = ((uint32_t)c16 << 16) | c16;
+						uint32_t *r32 = (uint32_t *)row;
+						int pairs = len >> 1;
+						int j;
+						for (j = 0; j < pairs; j++) r32[j] = c32;
+						row += pairs * 2;
+						len -= pairs * 2;
+					}
+					if (len > 0) *row = c16;
 				}
 			}
 		}
@@ -430,23 +441,46 @@ static void draw_line_clipped(int x1, int y1, int x2, int y2, int col)
 }
 
 
-/* Horizontal line - 16-bit fill */
+/*
+ * Optimized horizontal line - fills with 32-bit writes (2 pixels at a time).
+ * This is the single hottest function in the renderer.
+ */
 static void draw_hline(int x1, int x2, int y, int col)
 {
-	int tmp, i;
+	int tmp;
 	uint16_t c16;
+	uint16_t *row;
 	if (x1 > x2) { tmp = x1; x1 = x2; x2 = tmp; }
 	if (y < clip_ty || y > clip_by) return;
 	if (x1 < clip_tx) x1 = clip_tx;
 	if (x2 > clip_bx) x2 = clip_bx;
 	if (x1 > x2) return;
+
 	c16 = palette_rgba16[col];
-	for (i = x1; i <= x2; i++)
-		framebuf[y * N64_SCREEN_W + i] = c16;
+	row = &framebuf[y * N64_SCREEN_W];
+
+	/* Align to 32-bit boundary */
+	if ((x1 & 1) && x1 <= x2)
+		row[x1++] = c16;
+
+	/* Fill 2 pixels at a time with 32-bit writes */
+	{
+		uint32_t c32 = ((uint32_t)c16 << 16) | c16;
+		uint32_t *row32 = (uint32_t *)&row[x1];
+		int pairs = (x2 - x1 + 1) >> 1;
+		int i;
+		for (i = 0; i < pairs; i++)
+			row32[i] = c32;
+		x1 += pairs * 2;
+	}
+
+	/* Handle remaining pixel */
+	if (x1 <= x2)
+		row[x1] = c16;
 }
 
 
-/* Vertical line - 16-bit fill */
+/* Vertical line */
 static void draw_vline(int x, int y1, int y2, int col)
 {
 	int tmp;
@@ -640,24 +674,29 @@ void gfx_display_centre_text(int y, char *str, int psize, int col)
 }
 
 
-void gfx_clear_display(void)
+/* Fast zero-fill a region of the 16-bit framebuffer using 64-bit stores */
+static void fast_clear_region(int x1, int y1, int x2, int y2)
 {
 	int y;
-	for (y = GFX_Y_OFFSET + 1; y <= 383 + GFX_Y_OFFSET; y++)
-		memset(&framebuf[y * N64_SCREEN_W + GFX_X_OFFSET + 1], 0, 510 * 2);
+	int w_bytes = (x2 - x1 + 1) * 2;
+	for (y = y1; y <= y2; y++)
+		memset(&framebuf[y * N64_SCREEN_W + x1], 0, w_bytes);
+}
+
+void gfx_clear_display(void)
+{
+	fast_clear_region(GFX_X_OFFSET + 1, GFX_Y_OFFSET + 1,
+	                  GFX_X_OFFSET + 510, GFX_Y_OFFSET + 383);
 }
 
 void gfx_clear_text_area(void)
 {
-	int y;
-	for (y = GFX_Y_OFFSET + 340; y <= 383 + GFX_Y_OFFSET; y++)
-		memset(&framebuf[y * N64_SCREEN_W + GFX_X_OFFSET + 1], 0, 510 * 2);
+	fast_clear_region(GFX_X_OFFSET + 1, GFX_Y_OFFSET + 340,
+	                  GFX_X_OFFSET + 510, GFX_Y_OFFSET + 383);
 }
-
 
 void gfx_clear_area(int tx, int ty, int bx, int by)
 {
-	int y;
 	tx += GFX_X_OFFSET;
 	ty += GFX_Y_OFFSET;
 	bx += GFX_X_OFFSET;
@@ -668,8 +707,7 @@ void gfx_clear_area(int tx, int ty, int bx, int by)
 	if (bx >= N64_SCREEN_W) bx = N64_SCREEN_W - 1;
 	if (by >= N64_SCREEN_H) by = N64_SCREEN_H - 1;
 
-	for (y = ty; y <= by; y++)
-		memset(&framebuf[y * N64_SCREEN_W + tx], 0, (bx - tx + 1) * 2);
+	fast_clear_region(tx, ty, bx, by);
 }
 
 
@@ -940,9 +978,20 @@ void gfx_polygon(int num_points, int *poly_list, int face_colour)
 			if (sx <= ex)
 				{
 					uint16_t c16 = palette_rgba16[face_colour];
-					int xx;
-					for (xx = sx; xx <= ex; xx++)
-						framebuf[i * N64_SCREEN_W + xx] = c16;
+					uint16_t *row = &framebuf[i * N64_SCREEN_W + sx];
+					int len = ex - sx + 1;
+					/* 32-bit fill for speed */
+					if ((((uintptr_t)row) & 2) && len > 0) { *row++ = c16; len--; }
+					{
+						uint32_t c32 = ((uint32_t)c16 << 16) | c16;
+						uint32_t *r32 = (uint32_t *)row;
+						int pairs = len >> 1;
+						int j;
+						for (j = 0; j < pairs; j++) r32[j] = c32;
+						row += pairs * 2;
+						len -= pairs * 2;
+					}
+					if (len > 0) *row = c16;
 				}
 		}
 	}
