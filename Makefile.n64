@@ -49,7 +49,7 @@ filesystem:
 
 filesystem/%.wav64: %.wav | filesystem
 	@echo "    [AUDIO] $<"
-	$(N64_AUDIOCONV) --wav-resample 16000 --wav-mono -o $@ $<
+	$(N64_AUDIOCONV) --wav-resample 22050 --wav-mono -o $@ $<
 
 filesystem/newkind.cfg: newkind.cfg | filesystem
 	cp $< $@

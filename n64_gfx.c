@@ -21,13 +21,20 @@
 #include "elite.h"
 #include "n64_assets.h"
 
-/* Back-buffer: 16-bit RGBA5551 - same format as the N64 display.
- * Drawing functions convert palette index to RGBA5551 on write,
- * so gfx_update_screen is just a memcpy (no per-pixel conversion). */
-static uint16_t framebuf[N64_SCREEN_W * N64_SCREEN_H];
-
 /* The 256-color palette, stored as RGBA5551 for direct write */
 static uint16_t palette_rgba16[256];
+
+/* Active render target - points directly into display surface buffer.
+ * This eliminates the 600KB memcpy per frame. Drawing functions write
+ * directly to RDRAM that the VI reads from. */
+static uint16_t *framebuf;
+static int framebuf_stride; /* in uint16_t units */
+
+/* Fallback buffer used during init before first display_get */
+static uint16_t init_framebuf[N64_SCREEN_W * N64_SCREEN_H];
+
+/* Currently locked display surface */
+static surface_t *current_disp = NULL;
 
 volatile int frame_count;
 static timer_link_t *frame_timer_handle;
@@ -211,21 +218,28 @@ int gfx_graphics_startup(void)
 	 * Since the game's internal coordinates are 512x384 centered in
 	 * 640x480, on a 16:9 TV the image will appear wider and shorter
 	 * which actually helps with the vertical clipping issue. */
-	display_init(RESOLUTION_640x480, DEPTH_16_BPP, 2, GAMMA_NONE, FILTERS_RESAMPLE);
+	display_init(RESOLUTION_640x480, DEPTH_16_BPP, 3, GAMMA_NONE, FILTERS_RESAMPLE);
+
+	/* Use init_framebuf until first display_get in gfx_update_screen */
+	framebuf = init_framebuf;
+	framebuf_stride = N64_SCREEN_W;
+
+	/* Grab first display surface immediately so we can draw into it */
+	current_disp = display_get();
+	framebuf = (uint16_t *)current_disp->buffer;
+	framebuf_stride = current_disp->stride / 2;
 
 	/* Try to load palette from the scanner BMP (the authentic Elite palette) */
 	if (load_scanner_bmp(scanner_filename) != 0)
 	{
-		/* Fallback: try default name */
 		if (load_scanner_bmp("scanner.bmp") != 0)
 		{
-			/* Use built-in default palette */
 			init_default_palette();
 		}
 	}
 
 	/* Clear framebuffer */
-	memset(framebuf, 0, sizeof(framebuf));
+	memset(framebuf, 0, N64_SCREEN_W * N64_SCREEN_H * 2);
 
 	/* Set default clip region to full screen */
 	clip_tx = 0;
@@ -265,21 +279,24 @@ void gfx_graphics_shutdown(void)
  */
 void gfx_update_screen(void)
 {
-	surface_t *disp;
-
 	/* Wait for frame timing */
 	while (frame_count < 1)
 		; /* spin */
 	frame_count = 0;
 
-	disp = display_get();
+	/* Show the surface we just drew into */
+	if (current_disp)
+	{
+		/* Flush cache so the VI sees our writes */
+		data_cache_hit_writeback(current_disp->buffer,
+			current_disp->stride * N64_SCREEN_H);
+		display_show(current_disp);
+	}
 
-	/* Framebuffer is already in RGBA5551 format - just copy directly.
-	 * Use data_cache_hit_writeback to flush our writes, then memcpy. */
-	data_cache_hit_writeback(framebuf, sizeof(framebuf));
-	memcpy(disp->buffer, framebuf, N64_SCREEN_W * N64_SCREEN_H * 2);
-
-	display_show(disp);
+	/* Grab the next back buffer to draw into */
+	current_disp = display_get();
+	framebuf = (uint16_t *)current_disp->buffer;
+	framebuf_stride = current_disp->stride / 2;
 }
 
 

@@ -20,6 +20,8 @@
 #define OPTIONS_H
 
 void display_options (void);
+void quit_screen (void);
+void restart_screen (void);
 void select_previous_option (void);
 void select_next_option (void);
 void do_option (void);

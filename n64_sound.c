@@ -2,9 +2,6 @@
  * Elite - The New Kind.
  *
  * Nintendo 64 sound routines using libdragon audio mixer.
- *
- * WAV samples are converted to wav64 format and loaded from
- * the ROM filesystem (DFS). MIDI is not supported on N64.
  */
 
 #include <stdlib.h>
@@ -42,16 +39,22 @@ static int sample_runtime[NUM_SAMPLES] = {
 };
 
 static int sample_timeleft[NUM_SAMPLES];
-static int sample_exists[NUM_SAMPLES];
+
+/* Pre-opened wav64 handles - one per sample. Stays open for the game's lifetime. */
+static wav64_t sample_wave[NUM_SAMPLES];
+static int sample_loaded[NUM_SAMPLES];
+
+/* Track which sample is playing on each channel to avoid conflicts */
+static int ch_playing[NUM_CHANNELS];  /* sample index, or -1 */
 
 /*
- * Each channel gets its own wav64_t object to avoid DFS file handle
- * conflicts when the mixer reads audio data asynchronously.
- * ch_sample[ch] tracks which sample is loaded on each channel (-1 = none).
+ * Audio callback - called by the audio subsystem when it needs more data.
+ * This ensures the mixer is pumped at a steady rate regardless of game framerate.
  */
-static wav64_t ch_wave[NUM_CHANNELS];
-static int ch_sample[NUM_CHANNELS];
-static int ch_open[NUM_CHANNELS];
+static void audio_callback(short *buffer, size_t numsamples)
+{
+	mixer_poll(buffer, numsamples);
+}
 
 
 void snd_sound_startup(void)
@@ -60,31 +63,32 @@ void snd_sound_startup(void)
 
 	sound_on = 1;
 
-	audio_init(16000, 4);
+	/* 22050 Hz is the sweet spot: good enough quality, low CPU cost.
+	 * Use more buffers (8) for smoother output. */
+	audio_init(22050, 8);
 	mixer_init(NUM_CHANNELS);
 
-	/* Check which sample files exist in the ROM filesystem */
+	/* Pre-load all samples that exist */
 	for (i = 0; i < NUM_SAMPLES; i++)
 	{
-		FILE *fp = fopen(sample_filenames[i], "rb");
+		FILE *fp;
+		sample_loaded[i] = 0;
+		sample_timeleft[i] = 0;
+
+		fp = fopen(sample_filenames[i], "rb");
 		if (fp)
 		{
 			fclose(fp);
-			sample_exists[i] = 1;
+			wav64_open(&sample_wave[i], sample_filenames[i]);
+			sample_loaded[i] = 1;
 		}
-		else
-		{
-			sample_exists[i] = 0;
-		}
-		sample_timeleft[i] = 0;
 	}
 
-	/* Initialize channel tracking */
 	for (i = 0; i < NUM_CHANNELS; i++)
-	{
-		ch_sample[i] = -1;
-		ch_open[i] = 0;
-	}
+		ch_playing[i] = -1;
+
+	/* Install audio callback for crackle-free playback */
+	audio_set_buffer_callback(audio_callback);
 }
 
 
@@ -96,13 +100,12 @@ void snd_sound_shutdown(void)
 		return;
 
 	for (i = 0; i < NUM_CHANNELS; i++)
-	{
 		mixer_ch_stop(i);
-		if (ch_open[i])
-		{
-			wav64_close(&ch_wave[i]);
-			ch_open[i] = 0;
-		}
+
+	for (i = 0; i < NUM_SAMPLES; i++)
+	{
+		if (sample_loaded[i])
+			wav64_close(&sample_wave[i]);
 	}
 
 	sound_on = 0;
@@ -111,7 +114,7 @@ void snd_sound_shutdown(void)
 
 void snd_play_sample(int sample_no)
 {
-	int ch;
+	int ch, i;
 	static int next_channel = 0;
 
 	if (!sound_on)
@@ -120,7 +123,7 @@ void snd_play_sample(int sample_no)
 	if (sample_no < 0 || sample_no >= NUM_SAMPLES)
 		return;
 
-	if (!sample_exists[sample_no])
+	if (!sample_loaded[sample_no])
 		return;
 
 	if (sample_timeleft[sample_no] != 0)
@@ -128,28 +131,25 @@ void snd_play_sample(int sample_no)
 
 	sample_timeleft[sample_no] = sample_runtime[sample_no];
 
+	/* Check if this sample is already playing on any channel - skip if so */
+	for (i = 0; i < NUM_CHANNELS; i++)
+	{
+		if (ch_playing[i] == sample_no)
+			return;
+	}
+
 	/* Pick next channel (round-robin) */
 	ch = next_channel;
 	next_channel = (next_channel + 1) % NUM_CHANNELS;
 
-	/* Stop whatever is playing on this channel */
+	/* Stop whatever is on this channel */
 	mixer_ch_stop(ch);
+	ch_playing[ch] = -1;
 
-	/* Close previous wav64 on this channel if open */
-	if (ch_open[ch])
-	{
-		wav64_close(&ch_wave[ch]);
-		ch_open[ch] = 0;
-		ch_sample[ch] = -1;
-	}
-
-	/* Open a fresh wav64 handle for this channel */
-	wav64_open(&ch_wave[ch], sample_filenames[sample_no]);
-	ch_open[ch] = 1;
-	ch_sample[ch] = sample_no;
-
+	/* Play the pre-opened sample */
 	mixer_ch_set_vol(ch, 1.0f, 1.0f);
-	wav64_play(&ch_wave[ch], ch);
+	wav64_play(&sample_wave[sample_no], ch);
+	ch_playing[ch] = sample_no;
 }
 
 
@@ -166,13 +166,7 @@ void snd_update_sound(void)
 			sample_timeleft[i]--;
 	}
 
-	/* Pump the audio mixer */
-	if (audio_can_write())
-	{
-		short *buf = audio_write_begin();
-		mixer_poll(buf, audio_get_buffer_length());
-		audio_write_end();
-	}
+	/* Audio is pumped by the callback - no manual mixer_poll needed here */
 }
 
 

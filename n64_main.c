@@ -62,6 +62,154 @@ int remap_keys;
 int find_input;
 char find_name[20];
 
+/*
+ * N64 Pause Menu - shown when Start is pressed during gameplay.
+ * Provides access to all game screens and functions.
+ */
+#define PAUSE_ITEMS 14
+static const char *pause_menu_labels[PAUSE_ITEMS] = {
+	"Resume",
+	"Galactic Chart",
+	"Short Range Chart",
+	"Planet Data",
+	"Market Prices",
+	"Commander Status",
+	"Inventory",
+	"Equip Ship",
+	"Options",
+	"Hyperspace",
+	"Docking Computer",
+	"Find Planet",
+	"Save Commander",
+	"Quit Game",
+};
+
+static void run_pause_menu(void)
+{
+	int selection = 0;
+	int done = 0;
+
+	while (!done)
+	{
+		int i;
+		int menu_x = 120;
+		int menu_y = 60;
+
+		gfx_acquire_screen();
+		/* Draw semi-transparent overlay by darkening the view area */
+		gfx_clear_area(50, 40, 460, 340);
+		gfx_draw_colour_line(50, 40, 460, 40, GFX_COL_WHITE);
+		gfx_draw_colour_line(50, 340, 460, 340, GFX_COL_WHITE);
+		gfx_draw_colour_line(50, 40, 50, 340, GFX_COL_WHITE);
+		gfx_draw_colour_line(460, 40, 460, 340, GFX_COL_WHITE);
+
+		gfx_display_centre_text(46, "- PAUSED -", 140, GFX_COL_GOLD);
+
+		for (i = 0; i < PAUSE_ITEMS; i++)
+		{
+			int col = (i == selection) ? GFX_COL_WHITE : GFX_COL_GREY_1;
+			int y = menu_y + i * 20;
+
+			if (i == selection)
+				gfx_draw_rectangle(55, y - 1, 455, y + 15, GFX_COL_BLUE_4);
+
+			gfx_display_colour_text(menu_x, y, (char *)pause_menu_labels[i], col);
+		}
+
+		/* Control hints at bottom */
+		gfx_display_colour_text(60, 350, "D-Pad:Select  A:Confirm  Start:Resume", GFX_COL_GREY_1);
+
+		gfx_release_screen();
+		gfx_update_screen();
+
+		kbd_poll_keyboard();
+
+		if (kbd_up_pressed)
+		{
+			selection--;
+			if (selection < 0) selection = PAUSE_ITEMS - 1;
+		}
+		if (kbd_down_pressed)
+		{
+			selection++;
+			if (selection >= PAUSE_ITEMS) selection = 0;
+		}
+
+		if (kbd_resume_pressed) /* Start pressed again = resume */
+		{
+			done = 1;
+		}
+		else if (kbd_enter_pressed || kbd_y_pressed) /* A button = confirm */
+		{
+			switch (selection)
+			{
+				case 0:  /* Resume */
+					done = 1;
+					break;
+				case 1:  /* Galactic Chart */
+					done = 1; game_paused = 0;
+					old_cross_x = -1;
+					display_galactic_chart();
+					return;
+				case 2:  /* Short Range Chart */
+					done = 1; game_paused = 0;
+					old_cross_x = -1;
+					display_short_range_chart();
+					return;
+				case 3:  /* Planet Data */
+					done = 1; game_paused = 0;
+					display_data_on_planet();
+					return;
+				case 4:  /* Market Prices */
+					done = 1; game_paused = 0;
+					if (!witchspace) display_market_prices();
+					return;
+				case 5:  /* Commander Status */
+					done = 1; game_paused = 0;
+					display_commander_status();
+					return;
+				case 6:  /* Inventory */
+					done = 1; game_paused = 0;
+					display_inventory();
+					return;
+				case 7:  /* Equip Ship */
+					done = 1; game_paused = 0;
+					if (docked) equip_ship();
+					return;
+				case 8:  /* Options */
+					done = 1; game_paused = 0;
+					display_options();
+					return;
+				case 9:  /* Hyperspace */
+					done = 1; game_paused = 0;
+					if (!docked) start_hyperspace();
+					return;
+				case 10: /* Docking Computer */
+					done = 1; game_paused = 0;
+					if (!docked && cmdr.docking_computer)
+						engage_auto_pilot();
+					return;
+				case 11: /* Find Planet */
+					done = 1; game_paused = 0;
+					find_input = 1;
+					*find_name = '\0';
+					gfx_clear_text_area();
+					gfx_display_text(16, 340, "Planet Name?");
+					return;
+				case 12: /* Save Commander */
+					done = 1; game_paused = 0;
+					if (docked) save_commander_screen();
+					return;
+				case 13: /* Quit Game */
+					done = 1; game_paused = 0;
+					quit_screen();
+					return;
+			}
+		}
+	}
+	game_paused = 0;
+}
+
 
 /*
  * Initialise the game parameters.
@@ -724,8 +872,7 @@ void handle_flight_keys(void)
 
 	if (game_paused)
 	{
-		if (kbd_resume_pressed)
-			game_paused = 0;
+		run_pause_menu();
 		return;
 	}
 
