@@ -146,7 +146,7 @@ void snd_play_sample(int sample_no)
 
 void snd_update_sound(void)
 {
-	int i;
+	int i, ch;
 
 	if (!sound_on)
 		return;
@@ -154,7 +154,15 @@ void snd_update_sound(void)
 	for (i = 0; i < NUM_SAMPLES; i++)
 	{
 		if (sample_timeleft[i] > 0)
+		{
 			sample_timeleft[i]--;
+			if (sample_timeleft[i] == 0)
+			{
+				/* Cooldown expired - clear channel tracking so sample can play again */
+				for (ch = 0; ch < NUM_CHANNELS; ch++)
+					if (ch_playing[ch] == i) ch_playing[ch] = -1;
+			}
+		}
 	}
 
 	/* Pump the audio mixer - call multiple times to fill all ready buffers */

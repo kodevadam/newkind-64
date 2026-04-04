@@ -45,6 +45,9 @@
 int old_cross_x, old_cross_y;
 int cross_timer;
 
+/* frame_count is incremented by the timer in n64_gfx.c at speed_cap rate */
+extern volatile int frame_count;
+
 int draw_lasers;
 int mcount;
 int message_count;
@@ -207,6 +210,12 @@ static void run_pause_menu(void)
 			}
 		}
 	}
+	/* Redraw whichever chart we were viewing - the overlay dirtied the framebuf */
+	if (current_screen == SCR_GALACTIC_CHART)
+		display_galactic_chart();
+	else if (current_screen == SCR_SHORT_RANGE)
+		display_short_range_chart();
+
 	game_paused = 0;
 }
 
@@ -308,7 +317,6 @@ void draw_cross(int cx, int cy)
 	if (current_screen == SCR_SHORT_RANGE)
 	{
 		gfx_set_clip_region(1, 37, 510, 339);
-		/* XOR mode: on N64 we just draw in red (XOR not easily done with indexed color) */
 		gfx_draw_colour_line(cx - 16, cy, cx + 16, cy, GFX_COL_RED);
 		gfx_draw_colour_line(cx, cy - 16, cx, cy + 16, GFX_COL_RED);
 		gfx_set_clip_region(1, 1, 510, 383);
@@ -320,6 +328,27 @@ void draw_cross(int cx, int cy)
 		gfx_set_clip_region(1, 37, 510, 293);
 		gfx_draw_colour_line(cx - 8, cy, cx + 8, cy, GFX_COL_RED);
 		gfx_draw_colour_line(cx, cy - 8, cx, cy + 8, GFX_COL_RED);
+		gfx_set_clip_region(1, 1, 510, 383);
+	}
+}
+
+/* Erase the crosshair by drawing black over it (replaces original XOR erase) */
+static void erase_cross(int cx, int cy)
+{
+	if (current_screen == SCR_SHORT_RANGE)
+	{
+		gfx_set_clip_region(1, 37, 510, 339);
+		gfx_draw_colour_line(cx - 16, cy, cx + 16, cy, GFX_COL_BLACK);
+		gfx_draw_colour_line(cx, cy - 16, cx, cy + 16, GFX_COL_BLACK);
+		gfx_set_clip_region(1, 1, 510, 383);
+		return;
+	}
+
+	if (current_screen == SCR_GALACTIC_CHART)
+	{
+		gfx_set_clip_region(1, 37, 510, 293);
+		gfx_draw_colour_line(cx - 8, cy, cx + 8, cy, GFX_COL_BLACK);
+		gfx_draw_colour_line(cx, cy - 8, cx, cy + 8, GFX_COL_BLACK);
 		gfx_set_clip_region(1, 1, 510, 383);
 	}
 }
@@ -1456,8 +1485,15 @@ int main(void)
 
 		while (!game_over)
 		{
+			/* Always pump audio and push display at vsync rate (~60fps).
+			 * Game logic only runs when the speed_cap timer fires. */
 			snd_update_sound();
 			gfx_update_screen();
+
+			if (frame_count < 1)
+				continue;
+			frame_count--;
+
 			gfx_set_clip_region(1, 1, 510, 383);
 
 			rolling = 0;
@@ -1591,7 +1627,7 @@ int main(void)
 				(cross_y != old_cross_y))
 			{
 				if (old_cross_x != -1)
-					draw_cross(old_cross_x, old_cross_y);
+					erase_cross(old_cross_x, old_cross_y);
 
 				old_cross_x = cross_x;
 				old_cross_y = cross_y;

@@ -286,11 +286,8 @@ void gfx_update_screen(void)
 {
 	surface_t *disp;
 
-	/* Wait for frame timing */
-	while (frame_count < 1)
-		; /* spin */
-	frame_count = 0;
-
+	/* display_get() blocks until a buffer is free (vsync-locked).
+	 * Frame timing is now handled in the game loop via frame_count. */
 	disp = display_get();
 
 	/* Flush framebuf from cache, then fast-copy to display surface */
