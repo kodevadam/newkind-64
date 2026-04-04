@@ -32,14 +32,14 @@
 #define GFX_X_OFFSET	(64)
 #define GFX_Y_OFFSET	(0)
 #define GFX_X_CENTRE	(256)
-#define GFX_Y_CENTRE	(192)
+#define GFX_Y_CENTRE	(160)
 
 #define GFX_VIEW_TX		1
 #define GFX_VIEW_TY		1
 #define GFX_VIEW_BX		509
-#define GFX_VIEW_BY		381
+#define GFX_VIEW_BY		319
 
-#define SCANNER_Y		385
+#define SCANNER_Y		320
 
 #define N64_SCREEN_W	640
 #define N64_SCREEN_H	480
