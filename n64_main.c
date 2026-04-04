@@ -99,8 +99,8 @@ static void run_pause_menu(void)
 		int menu_y = 60;
 
 		gfx_acquire_screen();
-		/* Draw semi-transparent overlay by darkening the view area */
-		gfx_clear_area(50, 40, 460, 340);
+		/* Clear entire screen including cockpit area for clean menu */
+		gfx_clear_area(0, 0, 511, 480);
 		gfx_draw_colour_line(50, 40, 460, 40, GFX_COL_WHITE);
 		gfx_draw_colour_line(50, 340, 460, 340, GFX_COL_WHITE);
 		gfx_draw_colour_line(50, 40, 50, 340, GFX_COL_WHITE);
@@ -1585,7 +1585,7 @@ int main(void)
 		initialise_game();
 		dock_player();
 
-		update_console();
+		/* Don't draw scanner/console here - intro screens would show it */
 
 		current_screen = SCR_FRONT_VIEW;
 		run_first_intro_screen();

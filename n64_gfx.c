@@ -253,13 +253,8 @@ int gfx_graphics_startup(void)
 	clip_bx = N64_SCREEN_W - 1;
 	clip_by = N64_SCREEN_H - 1;
 
-	/* Draw initial scanner from the loaded BMP */
-	gfx_draw_scanner();
-
-	/* Draw border lines around the view area */
-	gfx_draw_line(0, 0, 0, GFX_VIEW_BY + 1);
-	gfx_draw_line(0, 0, 511, 0);
-	gfx_draw_line(511, 0, 511, GFX_VIEW_BY + 1);
+	/* Don't draw scanner at startup - it will be drawn by update_console()
+	 * when the game starts. Drawing it here makes it appear on intro screens. */
 
 	/* Setup frame timer for game speed regulation */
 	frame_count = 0;

@@ -815,8 +815,8 @@ void display_speed (void)
 	int len;
 	int colour;
 
-	sx = 417;
-	sy = SCANNER_Y + 47;
+	sx = 385;
+	sy = SCANNER_Y + 48;
 
 	len = ((flight_speed * 64) / myship.max_speed) - 1;
 
@@ -857,30 +857,30 @@ void display_shields (void)
 	 * Slot 1 (FU): y=47-51, Slot 2 (ES/FS): y=61-65, Slot 3 (RS): y=74-79,
 	 * Slot 4 (ED/EN): y=88-92, Slot 5 (CT): y=101-106, Slot 6 (LT): y=115-119 */
 	if (front_shield > 3)
-		display_dial_bar (front_shield / 4, 14, 47);
+		display_dial_bar (front_shield / 4, 14, 48);
 
 	if (aft_shield > 3)
-		display_dial_bar (aft_shield / 4, 14, 61);
+		display_dial_bar (aft_shield / 4, 14, 62);
 }
 
 
 void display_altitude (void)
 {
 	if (myship.altitude > 3)
-		display_dial_bar (myship.altitude / 4, 14, 115);
+		display_dial_bar (myship.altitude / 4, 14, 116);
 }
 
 void display_cabin_temp (void)
 {
 	if (myship.cabtemp > 3)
-		display_dial_bar (myship.cabtemp / 4, 14, 101);
+		display_dial_bar (myship.cabtemp / 4, 14, 102);
 }
 
 
 void display_laser_temp (void)
 {
 	if (laser_temp > 0)
-		display_dial_bar (laser_temp / 4, 14, 88);
+		display_dial_bar (laser_temp / 4, 14, 89);
 }
 
 
@@ -897,18 +897,18 @@ void display_energy (void)
 	e3 = energy > 192 ? 64 : energy - 128;
 	e4 = energy - 192;  	
 	
-	/* Right gauge slots: y=74-79, 88-92, 101-106, 115-119 */
+	/* Right gauge slots: y=75, 89, 102, 116, x starts at 385 */
 	if (e4 > 0)
-		display_dial_bar (e4, 416, 74);
+		display_dial_bar (e4, 385, 75);
 
 	if (e3 > 0)
-		display_dial_bar (e3, 416, 88);
+		display_dial_bar (e3, 385, 89);
 
 	if (e2 > 0)
-		display_dial_bar (e2, 416, 101);
+		display_dial_bar (e2, 385, 102);
 
 	if (e1 > 0)
-		display_dial_bar (e1, 416, 115);
+		display_dial_bar (e1, 385, 116);
 }
 
 
@@ -919,8 +919,8 @@ void display_flight_roll (void)
 	int i;
 	int pos;
 
-	sx = 416;
-	sy = SCANNER_Y + 61;
+	sx = 385;
+	sy = SCANNER_Y + 62;
 
 	pos = sx - ((flight_roll * 28) / myship.max_roll);
 	pos += 32;
@@ -937,8 +937,8 @@ void display_flight_climb (void)
 	int i;
 	int pos;
 
-	sx = 416;
-	sy = SCANNER_Y + 47;
+	sx = 385;
+	sy = SCANNER_Y + 48;
 
 	pos = sx + ((flight_climb * 28) / myship.max_climb);
 	pos += 32;
@@ -953,7 +953,7 @@ void display_flight_climb (void)
 void display_fuel (void)
 {
 	if (cmdr.fuel > 0)
-		display_dial_bar ((cmdr.fuel * 64) / myship.max_fuel, 14, 74);
+		display_dial_bar ((cmdr.fuel * 64) / myship.max_fuel, 14, 75);
 }
 
 
