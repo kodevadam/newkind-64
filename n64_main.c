@@ -1501,14 +1501,15 @@ int main(void)
 					sim_counter = 0;
 			}
 
+			/* ===== INPUT PHASE (every frame for responsive controls) ===== */
+			gfx_set_clip_region(1, 1, 510, 383);
+			rolling = 0;
+			climbing = 0;
+			handle_flight_keys();
+
 			/* ===== SIMULATION PHASE (only on sim ticks) ===== */
 			if (do_sim)
 			{
-				gfx_set_clip_region(1, 1, 510, 383);
-				rolling = 0;
-				climbing = 0;
-
-				handle_flight_keys();
 				snd_tick_cooldowns();
 
 				if (!game_paused)
@@ -1516,24 +1517,28 @@ int main(void)
 					if (message_count > 0)
 						message_count--;
 
-					if (!rolling)
-					{
-						if (flight_roll > 0) decrease_flight_roll();
-						if (flight_roll < 0) increase_flight_roll();
-					}
-
-					if (!climbing)
-					{
-						if (flight_climb > 0) decrease_flight_climb();
-						if (flight_climb < 0) increase_flight_climb();
-					}
-
 					if (!docked && auto_pilot)
 					{
 						auto_dock();
 						if ((mcount & 127) == 0)
 							info_message("Docking Computers On");
 					}
+				}
+			}
+
+			/* Roll/climb decay runs every frame for smooth response */
+			if (!game_paused)
+			{
+				if (!rolling)
+				{
+					if (flight_roll > 0) decrease_flight_roll();
+					if (flight_roll < 0) increase_flight_roll();
+				}
+
+				if (!climbing)
+				{
+					if (flight_climb > 0) decrease_flight_climb();
+					if (flight_climb < 0) increase_flight_climb();
 				}
 			}
 

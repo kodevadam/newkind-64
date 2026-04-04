@@ -588,9 +588,7 @@ void generate_landscape (int rnd_seed)
 
 void render_planet_line (int xo, int yo, int x, int y, int radius, int vx, int vy)
 {
-	int lx, ly;
 	int rx, ry;
-	int colour;
 	int sx,sy;
 	int ex;
 	int div;
@@ -604,34 +602,62 @@ void render_planet_line (int xo, int yo, int x, int y, int radius, int vx, int v
 	sx = xo - x;
 	ex = xo + x;
 
-	rx = -x * vx - y * vy;
-	ry = -x * vy + y * vx;
-	rx += radius << 16;
-	ry += radius << 16;
-	div = radius << 10;	 /* radius * 2 * LAND_X_MAX >> 16 */
+	/* Clip to view bounds early to avoid per-pixel bounds checks */
+	if (sx < GFX_VIEW_TX + GFX_X_OFFSET)
+	{
+		int skip = (GFX_VIEW_TX + GFX_X_OFFSET) - sx;
+		sx = GFX_VIEW_TX + GFX_X_OFFSET;
+		/* Advance rx/ry by skip pixels worth of vx/vy */
+		rx = -x * vx - y * vy + (radius << 16) + skip * vx;
+		ry = -x * vy + y * vx + (radius << 16) + skip * vy;
+	}
+	else
+	{
+		rx = -x * vx - y * vy + (radius << 16);
+		ry = -x * vy + y * vx + (radius << 16);
+	}
+	if (ex > GFX_VIEW_BX + GFX_X_OFFSET)
+		ex = GFX_VIEW_BX + GFX_X_OFFSET;
+	if (sx > ex) return;
 
+	div = radius << 10;
 	if (div == 0) return;
 
-	/* Pre-compute reciprocal to replace per-pixel division with multiply+shift.
-	 * inv_div = (1 << 20) / div. Then lx = (rx * inv_div) >> 20. */
+	/* Use 32-bit fixed-point instead of 64-bit multiply where possible.
+	 * For small radii (< 1024), the values fit in 32 bits. */
 	{
 		int inv_div = (1 << 20) / div;
 
-		for (; sx <= ex; sx++)
+		if (radius < 512)
 		{
-			if ((sx >= (GFX_VIEW_TX + GFX_X_OFFSET)) && (sx <= (GFX_VIEW_BX + GFX_X_OFFSET)))
+			/* Fast 32-bit path: rx and ry fit in ~26 bits, inv_div in ~20 bits.
+			 * Product fits in 32 bits after right-shift. */
+			for (; sx <= ex; sx++)
 			{
-				lx = (int)(((long long)rx * inv_div) >> 20);
-				ly = (int)(((long long)ry * inv_div) >> 20);
+				int lx = (rx >> 4) * (inv_div >> 4) >> 12;
+				int ly = (ry >> 4) * (inv_div >> 4) >> 12;
 
-				if (lx >= 0 && lx <= LAND_X_MAX && ly >= 0 && ly <= LAND_Y_MAX)
-				{
-					colour = landscape[lx][ly];
-					gfx_fast_plot_pixel (sx, sy, colour);
-				}
+				if ((unsigned)lx <= LAND_X_MAX && (unsigned)ly <= LAND_Y_MAX)
+					gfx_fast_plot_pixel(sx, sy, landscape[lx][ly]);
+
+				rx += vx;
+				ry += vy;
 			}
-			rx += vx;
-			ry += vy;
+		}
+		else
+		{
+			/* Large radius: need 64-bit multiply for precision */
+			for (; sx <= ex; sx++)
+			{
+				int lx = (int)(((long long)rx * inv_div) >> 20);
+				int ly = (int)(((long long)ry * inv_div) >> 20);
+
+				if ((unsigned)lx <= LAND_X_MAX && (unsigned)ly <= LAND_Y_MAX)
+					gfx_fast_plot_pixel(sx, sy, landscape[lx][ly]);
+
+				rx += vx;
+				ry += vy;
+			}
 		}
 	}
 }
