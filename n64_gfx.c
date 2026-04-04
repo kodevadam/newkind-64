@@ -257,9 +257,9 @@ int gfx_graphics_startup(void)
 	gfx_draw_scanner();
 
 	/* Draw border lines around the view area */
-	gfx_draw_line(0, 0, 0, 384);
+	gfx_draw_line(0, 0, 0, GFX_VIEW_BY + 1);
 	gfx_draw_line(0, 0, 511, 0);
-	gfx_draw_line(511, 0, 511, 384);
+	gfx_draw_line(511, 0, 511, GFX_VIEW_BY + 1);
 
 	/* Setup frame timer for game speed regulation */
 	frame_count = 0;
@@ -799,9 +799,9 @@ void gfx_draw_borders(void)
 {
 	/* Border lines around the view area - must be redrawn each frame
 	 * since there's no persistent framebuffer. */
-	gfx_draw_line(0, 0, 0, 384);
+	gfx_draw_line(0, 0, 0, GFX_VIEW_BY + 1);
 	gfx_draw_line(0, 0, 511, 0);
-	gfx_draw_line(511, 0, 511, 384);
+	gfx_draw_line(511, 0, 511, GFX_VIEW_BY + 1);
 }
 
 

@@ -14,6 +14,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "config.h"
+#include "gfx.h"
+
 #include <libdragon.h>
 
 #include "elite.h"
@@ -168,25 +171,25 @@ void read_scanner_config_file(char *filename)
 	if (read_cfg_line_from_buf(buf, buflen, &pos, str, sizeof(str)) == 0)
 	{
 		sscanf(str, "%d,%d", &scanner_cx, &scanner_cy);
-		scanner_cy += 385;
+		scanner_cy += SCANNER_Y;
 	}
 
 	if (read_cfg_line_from_buf(buf, buflen, &pos, str, sizeof(str)) == 0)
 	{
 		sscanf(str, "%d,%d", &compass_centre_x, &compass_centre_y);
-		compass_centre_y += 385;
+		compass_centre_y += SCANNER_Y;
 	}
 
 	if (read_cfg_line_from_buf(buf, buflen, &pos, str, sizeof(str)) == 0)
 	{
 		sscanf(str, "%d,%d,%d", &condition_x, &condition_y, &condition_r);
-		condition_y += 385;
+		condition_y += SCANNER_Y;
 	}
 
 	if (read_cfg_line_from_buf(buf, buflen, &pos, str, sizeof(str)) == 0)
 	{
 		sscanf(str, "%d,%d", &zoom_x, &zoom_y);
-		zoom_y += 385;
+		zoom_y += SCANNER_Y;
 	}
 
 	free(buf);
