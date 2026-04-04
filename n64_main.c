@@ -343,7 +343,7 @@ void draw_cross(int cx, int cy)
 		gfx_set_clip_region(1, 37, 510, 339);
 		gfx_draw_colour_line(cx - 16, cy, cx + 16, cy, GFX_COL_RED);
 		gfx_draw_colour_line(cx, cy - 16, cx, cy + 16, GFX_COL_RED);
-		gfx_set_clip_region(1, 1, 510, 383);
+		gfx_set_clip_region(1, 1, 510, GFX_VIEW_BY);
 		return;
 	}
 
@@ -352,7 +352,7 @@ void draw_cross(int cx, int cy)
 		gfx_set_clip_region(1, 37, 510, 293);
 		gfx_draw_colour_line(cx - 8, cy, cx + 8, cy, GFX_COL_RED);
 		gfx_draw_colour_line(cx, cy - 8, cx, cy + 8, GFX_COL_RED);
-		gfx_set_clip_region(1, 1, 510, 383);
+		gfx_set_clip_region(1, 1, 510, GFX_VIEW_BY);
 	}
 }
 
@@ -846,7 +846,7 @@ void run_escape_sequence(void)
 			snd_play_sample(SND_EXPLODE);
 		}
 
-		gfx_set_clip_region(1, 1, 510, 383);
+		gfx_set_clip_region(1, 1, 510, GFX_VIEW_BY);
 		gfx_clear_display();
 		update_starfield();
 		update_universe();
@@ -876,7 +876,7 @@ void run_escape_sequence(void)
 		}
 
 		warp_stars = 1;
-		gfx_set_clip_region(1, 1, 510, 383);
+		gfx_set_clip_region(1, 1, 510, GFX_VIEW_BY);
 		gfx_clear_display();
 		update_starfield();
 		update_universe();
@@ -1417,7 +1417,7 @@ void run_game_over_screen()
 	int type;
 
 	current_screen = SCR_GAME_OVER;
-	gfx_set_clip_region(1, 1, 510, 383);
+	gfx_set_clip_region(1, 1, 510, GFX_VIEW_BY);
 
 	flight_speed = 6;
 	flight_roll = 0;
@@ -1462,7 +1462,7 @@ void display_break_pattern(void)
 {
 	int i;
 
-	gfx_set_clip_region(1, 1, 510, 383);
+	gfx_set_clip_region(1, 1, 510, GFX_VIEW_BY);
 	gfx_clear_display();
 
 	for (i = 0; i < 20; i++)
@@ -1544,7 +1544,7 @@ int main(void)
 		initialise_game();
 		dock_player();
 
-		update_console();
+		/* Don't draw console here - it would appear on intro screens */
 
 		current_screen = SCR_FRONT_VIEW;
 		run_first_intro_screen();
@@ -1586,7 +1586,7 @@ int main(void)
 			}
 
 			/* ===== INPUT PHASE (every frame for responsive controls) ===== */
-			gfx_set_clip_region(1, 1, 510, 383);
+			gfx_set_clip_region(1, 1, 510, GFX_VIEW_BY);
 			rolling = 0;
 			climbing = 0;
 			handle_flight_keys();
@@ -1634,7 +1634,7 @@ int main(void)
 
 			if (!docked)
 			{
-				gfx_set_clip_region(1, 1, 510, 383);
+				gfx_set_clip_region(1, 1, 510, GFX_VIEW_BY);
 
 				if ((current_screen == SCR_FRONT_VIEW) || (current_screen == SCR_REAR_VIEW) ||
 					(current_screen == SCR_LEFT_VIEW) || (current_screen == SCR_RIGHT_VIEW) ||
@@ -1730,7 +1730,7 @@ int main(void)
 						gfx_set_clip_region(1, 37, 510, clip_b);
 						gfx_draw_colour_line(old_cross_x - half, old_cross_y, old_cross_x + half, old_cross_y, GFX_COL_BLACK);
 						gfx_draw_colour_line(old_cross_x, old_cross_y - half, old_cross_x, old_cross_y + half, GFX_COL_BLACK);
-						gfx_set_clip_region(1, 1, 510, 383);
+						gfx_set_clip_region(1, 1, 510, GFX_VIEW_BY);
 					}
 					old_cross_x = cross_x;
 					old_cross_y = cross_y;

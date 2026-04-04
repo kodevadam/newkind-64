@@ -253,13 +253,8 @@ int gfx_graphics_startup(void)
 	clip_bx = N64_SCREEN_W - 1;
 	clip_by = N64_SCREEN_H - 1;
 
-	/* Draw initial scanner from the loaded BMP */
-	gfx_draw_scanner();
-
-	/* Draw border lines around the view area */
-	gfx_draw_line(0, 0, 0, 384);
-	gfx_draw_line(0, 0, 511, 0);
-	gfx_draw_line(511, 0, 511, 384);
+	/* Scanner and borders are drawn by update_console() during gameplay.
+	 * Don't draw at startup - they'd show on the intro screens. */
 
 	/* Setup frame timer for game speed regulation */
 	frame_count = 0;
@@ -679,13 +674,13 @@ static void fast_clear_region(int x1, int y1, int x2, int y2)
 void gfx_clear_display(void)
 {
 	fast_clear_region(GFX_X_OFFSET + 1, GFX_Y_OFFSET + 1,
-	                  GFX_X_OFFSET + 510, GFX_Y_OFFSET + 383);
+	                  GFX_X_OFFSET + 510, GFX_Y_OFFSET + GFX_VIEW_BY);
 }
 
 void gfx_clear_text_area(void)
 {
-	fast_clear_region(GFX_X_OFFSET + 1, GFX_Y_OFFSET + 340,
-	                  GFX_X_OFFSET + 510, GFX_Y_OFFSET + 383);
+	fast_clear_region(GFX_X_OFFSET + 1, GFX_Y_OFFSET + GFX_VIEW_BY - 42,
+	                  GFX_X_OFFSET + 510, GFX_Y_OFFSET + GFX_VIEW_BY);
 }
 
 void gfx_clear_area(int tx, int ty, int bx, int by)
@@ -799,9 +794,9 @@ void gfx_draw_borders(void)
 {
 	/* Border lines around the view area - must be redrawn each frame
 	 * since there's no persistent framebuffer. */
-	gfx_draw_line(0, 0, 0, 384);
+	gfx_draw_line(0, 0, 0, GFX_VIEW_BY + 1);
 	gfx_draw_line(0, 0, 511, 0);
-	gfx_draw_line(511, 0, 511, 384);
+	gfx_draw_line(511, 0, 511, GFX_VIEW_BY + 1);
 }
 
 

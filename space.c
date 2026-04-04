@@ -815,14 +815,14 @@ void display_speed (void)
 	int len;
 	int colour;
 
-	sx = 417;
-	sy = 384 + 9;
+	sx = 432;
+	sy = SCANNER_Y + 114;
 
 	len = ((flight_speed * 64) / myship.max_speed) - 1;
 
 	colour = (flight_speed > (myship.max_speed * 2 / 3)) ? GFX_COL_DARK_RED : GFX_COL_GOLD;
 
-	for (i = 0; i < 6; i++)
+	for (i = 0; i < 10; i++)
 	{
 		gfx_draw_colour_line (sx, sy + i, sx + len, sy + i, colour);
 	}
@@ -836,16 +836,16 @@ void display_speed (void)
 
 void display_dial_bar (int len, int x, int y)
 {
-	int i = 0;
+	int i;
+	int base = y + SCANNER_Y;
 
-	gfx_draw_colour_line (x, y + 384, x + len, y + 384, GFX_COL_GOLD);
-	i++;
-	gfx_draw_colour_line (x, y + i + 384, x + len, y + i + 384, GFX_COL_GOLD);
-	
-	for (i = 2; i < 7; i++)
-		gfx_draw_colour_line (x, y + i + 384, x + len, y + i + 384, GFX_COL_YELLOW_1);
-
-	gfx_draw_colour_line (x, y + i + 384, x + len, y + i + 384, GFX_COL_DARK_RED);
+	/* NES-style gauge bar: fits in ~10px tall slots at 2x scale */
+	gfx_draw_colour_line (x, base, x + len, base, GFX_COL_GOLD);
+	gfx_draw_colour_line (x, base + 1, x + len, base + 1, GFX_COL_GOLD);
+	for (i = 2; i < 8; i++)
+		gfx_draw_colour_line (x, base + i, x + len, base + i, GFX_COL_YELLOW_1);
+	gfx_draw_colour_line (x, base + 8, x + len, base + 8, GFX_COL_DARK_RED);
+	gfx_draw_colour_line (x, base + 9, x + len, base + 9, GFX_COL_DARK_RED);
 }
 
 
@@ -855,31 +855,32 @@ void display_dial_bar (int len, int x, int y)
 
 void display_shields (void)
 {
+	/* NES dashboard left gauges: FU(50), FS(66), AS(82), EN(98), CT(114) */
 	if (front_shield > 3)
-		display_dial_bar (front_shield / 4, 31, 7);
+		display_dial_bar (front_shield / 4, 16, 50);
 
 	if (aft_shield > 3)
-		display_dial_bar (aft_shield / 4, 31, 23);
+		display_dial_bar (aft_shield / 4, 16, 66);
 }
 
 
 void display_altitude (void)
 {
 	if (myship.altitude > 3)
-		display_dial_bar (myship.altitude / 4, 31, 92);
+		display_dial_bar (myship.altitude / 4, 16, 114);
 }
 
 void display_cabin_temp (void)
 {
 	if (myship.cabtemp > 3)
-		display_dial_bar (myship.cabtemp / 4, 31, 60);
+		display_dial_bar (myship.cabtemp / 4, 16, 98);
 }
 
 
 void display_laser_temp (void)
 {
 	if (laser_temp > 0)
-		display_dial_bar (laser_temp / 4, 31, 76);
+		display_dial_bar (laser_temp / 4, 16, 114);
 }
 
 
@@ -896,17 +897,18 @@ void display_energy (void)
 	e3 = energy > 192 ? 64 : energy - 128;
 	e4 = energy - 192;  	
 	
+	/* NES dashboard right gauges: energy banks at y=82,98 + speed area */
 	if (e4 > 0)
-		display_dial_bar (e4, 416, 61);
+		display_dial_bar (e4, 432, 50);
 
 	if (e3 > 0)
-		display_dial_bar (e3, 416, 79);
+		display_dial_bar (e3, 432, 66);
 
 	if (e2 > 0)
-		display_dial_bar (e2, 416, 97);
+		display_dial_bar (e2, 432, 82);
 
 	if (e1 > 0)
-		display_dial_bar (e1, 416, 115);
+		display_dial_bar (e1, 432, 98);
 }
 
 
@@ -917,16 +919,9 @@ void display_flight_roll (void)
 	int i;
 	int pos;
 
-	sx = 416;
-	sy = 384 + 9 + 14;
-
-	pos = sx - ((flight_roll * 28) / myship.max_roll);
-	pos += 32;
-
-	for (i = 0; i < 4; i++)
-	{
-		gfx_draw_colour_line (pos + i, sy, pos + i, sy + 7, GFX_COL_GOLD);
-	}
+	/* NES dashboard: roll/climb are not displayed as separate bars.
+	 * On NES they use the compass area. Stub these for now. */
+	(void)sx; (void)sy; (void)pos; (void)i;
 }
 
 void display_flight_climb (void)
@@ -935,23 +930,14 @@ void display_flight_climb (void)
 	int i;
 	int pos;
 
-	sx = 416;
-	sy = 384 + 9 + 14 + 16;
-
-	pos = sx + ((flight_climb * 28) / myship.max_climb);
-	pos += 32;
-
-	for (i = 0; i < 4; i++)
-	{
-		gfx_draw_colour_line (pos + i, sy, pos + i, sy + 7, GFX_COL_GOLD);
-	}
+	(void)sx; (void)sy; (void)pos; (void)i;
 }
 
 
 void display_fuel (void)
 {
 	if (cmdr.fuel > 0)
-		display_dial_bar ((cmdr.fuel * 64) / myship.max_fuel, 31, 44);
+		display_dial_bar ((cmdr.fuel * 64) / myship.max_fuel, 16, 82);
 }
 
 
@@ -966,7 +952,7 @@ void display_missiles (void)
 	nomiss = cmdr.missiles > 4 ? 4 : cmdr.missiles;
 
 	x = (4 - nomiss) * 16 + 35;
-	y = 113 + 385;
+	y = 113 + SCANNER_Y;
 	
 	if (missile_target != MISSILE_UNARMED)
 	{
