@@ -210,12 +210,44 @@ static void run_pause_menu(void)
 			}
 		}
 	}
-	/* Redraw whichever chart we were viewing - the overlay dirtied the framebuf */
-	if (current_screen == SCR_GALACTIC_CHART)
-		display_galactic_chart();
-	else if (current_screen == SCR_SHORT_RANGE)
-		display_short_range_chart();
+	/* The pause overlay drew into the persistent framebuf. Restore it by
+	 * redrawing whatever screen was underneath. Flight views are redrawn
+	 * automatically by the game loop; other screens need explicit redraw. */
+	switch (current_screen)
+	{
+		case SCR_GALACTIC_CHART:
+			old_cross_x = -1;
+			display_galactic_chart();
+			break;
+		case SCR_SHORT_RANGE:
+			old_cross_x = -1;
+			display_short_range_chart();
+			break;
+		case SCR_PLANET_DATA:
+			display_data_on_planet();
+			break;
+		case SCR_MARKET_PRICES:
+			display_market_prices();
+			break;
+		case SCR_CMDR_STATUS:
+			display_commander_status();
+			break;
+		case SCR_INVENTORY:
+			display_inventory();
+			break;
+		case SCR_EQUIP_SHIP:
+			equip_ship();
+			break;
+		case SCR_OPTIONS:
+			display_options();
+			break;
+		default:
+			break;
+	}
+	update_console();
 
+	/* Drain accumulated timer ticks so the game doesn't fast-forward */
+	frame_count = 0;
 	game_paused = 0;
 }
 
@@ -1500,6 +1532,7 @@ int main(void)
 			climbing = 0;
 
 			handle_flight_keys();
+			snd_tick_cooldowns();
 
 			if (game_paused)
 				continue;

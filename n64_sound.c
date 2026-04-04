@@ -144,7 +144,11 @@ void snd_play_sample(int sample_no)
 }
 
 
-void snd_update_sound(void)
+/*
+ * Tick sample cooldown timers. Must be called at game-logic rate (not vsync)
+ * so that cooldown durations stay correct regardless of display frame rate.
+ */
+void snd_tick_cooldowns(void)
 {
 	int i, ch;
 
@@ -164,8 +168,16 @@ void snd_update_sound(void)
 			}
 		}
 	}
+}
 
-	/* Pump the audio mixer - call multiple times to fill all ready buffers */
+/*
+ * Pump the audio mixer. Called at vsync rate (~60fps) for smooth audio output.
+ */
+void snd_update_sound(void)
+{
+	if (!sound_on)
+		return;
+
 	while (audio_can_write())
 	{
 		short *buf = audio_write_begin();
