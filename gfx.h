@@ -37,9 +37,9 @@
 #define GFX_VIEW_TX		1
 #define GFX_VIEW_TY		1
 #define GFX_VIEW_BX		509
-#define GFX_VIEW_BY		349
+#define GFX_VIEW_BY		339
 
-#define SCANNER_Y		351
+#define SCANNER_Y		341
 
 #define N64_SCREEN_W	640
 #define N64_SCREEN_H	480

@@ -816,7 +816,7 @@ void display_speed (void)
 	int colour;
 
 	sx = 417;
-	sy = SCANNER_Y + 49;
+	sy = SCANNER_Y + 47;
 
 	len = ((flight_speed * 64) / myship.max_speed) - 1;
 
@@ -836,17 +836,14 @@ void display_speed (void)
 
 void display_dial_bar (int len, int x, int y)
 {
-	int i = 0;
+	int i;
 	int base = y + SCANNER_Y;
 
+	/* Draw gauge bar to fit 5px tall slots in SNES cockpit */
 	gfx_draw_colour_line (x, base, x + len, base, GFX_COL_GOLD);
-	i++;
-	gfx_draw_colour_line (x, base + i, x + len, base + i, GFX_COL_GOLD);
-
-	for (i = 2; i < 7; i++)
+	for (i = 1; i < 4; i++)
 		gfx_draw_colour_line (x, base + i, x + len, base + i, GFX_COL_YELLOW_1);
-
-	gfx_draw_colour_line (x, base + i, x + len, base + i, GFX_COL_DARK_RED);
+	gfx_draw_colour_line (x, base + 4, x + len, base + 4, GFX_COL_DARK_RED);
 }
 
 
@@ -856,32 +853,34 @@ void display_dial_bar (int len, int x, int y)
 
 void display_shields (void)
 {
-	/* Left gauge slots: image y = 49, 63, 77, 90, 103, 117 */
+	/* Left gauge slots from image analysis:
+	 * Slot 1 (FU): y=47-51, Slot 2 (ES/FS): y=61-65, Slot 3 (RS): y=74-79,
+	 * Slot 4 (ED/EN): y=88-92, Slot 5 (CT): y=101-106, Slot 6 (LT): y=115-119 */
 	if (front_shield > 3)
-		display_dial_bar (front_shield / 4, 14, 49);
+		display_dial_bar (front_shield / 4, 14, 47);
 
 	if (aft_shield > 3)
-		display_dial_bar (aft_shield / 4, 14, 63);
+		display_dial_bar (aft_shield / 4, 14, 61);
 }
 
 
 void display_altitude (void)
 {
 	if (myship.altitude > 3)
-		display_dial_bar (myship.altitude / 4, 14, 117);
+		display_dial_bar (myship.altitude / 4, 14, 115);
 }
 
 void display_cabin_temp (void)
 {
 	if (myship.cabtemp > 3)
-		display_dial_bar (myship.cabtemp / 4, 14, 90);
+		display_dial_bar (myship.cabtemp / 4, 14, 101);
 }
 
 
 void display_laser_temp (void)
 {
 	if (laser_temp > 0)
-		display_dial_bar (laser_temp / 4, 14, 103);
+		display_dial_bar (laser_temp / 4, 14, 88);
 }
 
 
@@ -898,18 +897,18 @@ void display_energy (void)
 	e3 = energy > 192 ? 64 : energy - 128;
 	e4 = energy - 192;  	
 	
-	/* Right gauge slots: image y = 49, 63, 77, 90, 103, 117 */
+	/* Right gauge slots: y=74-79, 88-92, 101-106, 115-119 */
 	if (e4 > 0)
-		display_dial_bar (e4, 416, 77);
+		display_dial_bar (e4, 416, 74);
 
 	if (e3 > 0)
-		display_dial_bar (e3, 416, 90);
+		display_dial_bar (e3, 416, 88);
 
 	if (e2 > 0)
-		display_dial_bar (e2, 416, 103);
+		display_dial_bar (e2, 416, 101);
 
 	if (e1 > 0)
-		display_dial_bar (e1, 416, 117);
+		display_dial_bar (e1, 416, 115);
 }
 
 
@@ -921,7 +920,7 @@ void display_flight_roll (void)
 	int pos;
 
 	sx = 416;
-	sy = SCANNER_Y + 63;
+	sy = SCANNER_Y + 61;
 
 	pos = sx - ((flight_roll * 28) / myship.max_roll);
 	pos += 32;
@@ -939,7 +938,7 @@ void display_flight_climb (void)
 	int pos;
 
 	sx = 416;
-	sy = SCANNER_Y + 49;
+	sy = SCANNER_Y + 47;
 
 	pos = sx + ((flight_climb * 28) / myship.max_climb);
 	pos += 32;
@@ -954,7 +953,7 @@ void display_flight_climb (void)
 void display_fuel (void)
 {
 	if (cmdr.fuel > 0)
-		display_dial_bar ((cmdr.fuel * 64) / myship.max_fuel, 14, 77);
+		display_dial_bar ((cmdr.fuel * 64) / myship.max_fuel, 14, 74);
 }
 
 
