@@ -792,11 +792,8 @@ void gfx_set_clip_region(int tx, int ty, int bx, int by)
 
 void gfx_draw_borders(void)
 {
-	/* Border lines around the view area - must be redrawn each frame
-	 * since there's no persistent framebuffer. */
-	gfx_draw_line(0, 0, 0, GFX_VIEW_BY + 1);
-	gfx_draw_line(0, 0, 511, 0);
-	gfx_draw_line(511, 0, 511, GFX_VIEW_BY + 1);
+	/* NES dashboard has its own border tiles - no vanilla border lines needed.
+	 * The NES view area has no white border frame. */
 }
 
 

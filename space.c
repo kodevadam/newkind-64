@@ -997,11 +997,15 @@ void update_console (void)
 	  gfx_display_text(zoom_x, zoom_y, buf);
 	}
 
+	/* NES dashboard does not have these vanilla NewKind sprite indicators.
+	 * Station "S" and ECM "E" are shown differently on NES. */
+#if 0
 	if (ship_count[SHIP_CORIOLIS] || ship_count[SHIP_DODEC])
 		gfx_draw_sprite (IMG_BIG_S, 387, 490);
 
 	if (ecm_active)
 		gfx_draw_sprite (IMG_BIG_E, 115, 490);
+#endif
 
 	gfx_set_clip_region (0, 0, 512, 512);
 }
