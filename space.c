@@ -859,10 +859,10 @@ void display_shields (void)
 
 void display_altitude (void)
 {
-	/* NES row 28, col 28: palette 3, color 3 = cyan ($1C)
+	/* NES row 28, col 28: palette 3, color 3 = $1C (dark cyan)
 	 * X = 432, Y = (28-20)*16 = 128 */
 	if (myship.altitude > 3)
-		display_dial_bar (myship.altitude / 4, 432, 128, GFX_COL_CYAN);
+		display_dial_bar (myship.altitude / 4, 432, 128, GFX_COL_GREEN_2);
 }
 
 void display_cabin_temp (void)
@@ -924,9 +924,9 @@ void display_flight_climb (void)
 
 void display_fuel (void)
 {
-	/* NES row 23: palette 3, color 3 = cyan ($1C). Y = (23-20)*16 = 48 */
+	/* NES row 23: palette 3, color 3 = $1C (dark cyan). Y = (23-20)*16 = 48 */
 	if (cmdr.fuel > 0)
-		display_dial_bar ((cmdr.fuel * 64) / myship.max_fuel, 16, 48, GFX_COL_CYAN);
+		display_dial_bar ((cmdr.fuel * 64) / myship.max_fuel, 16, 48, GFX_COL_GREEN_2);
 }
 
 

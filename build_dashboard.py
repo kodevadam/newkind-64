@@ -2,105 +2,85 @@
 """
 Reconstruct the NES Elite dashboard BMP from source data.
 
-Uses the exact binary tile data, nametable layout, attribute table,
-and palette from the NES Elite disassembled source code.
+Maps NES tile colors to the GFX_COL_xxx palette indices used by
+the C code, so tile colors and dynamically drawn elements (gauges,
+text, etc.) share the same palette.
 
-CRITICAL: The BMP palette indices MUST match the GFX_COL_* constants
-in gfx.h, because the game uses those indices to draw gauge fills,
-text, ships, etc. The BMP palette IS the master palette for the game.
-
-Output: scanner.bmp (512x160, 8-bit indexed color)
-  - Rows 0-31:   Icon bar (NES rows 20-21) at 2x scale
-  - Rows 32-47:  Dashboard top border (NES row 22) at 2x scale
-  - Rows 48-143: Dashboard gauges/scanner (NES rows 23-28) at 2x scale
-  - Rows 144-159: Bottom border (NES row 29) at 2x scale
+Pattern table 0 layout:
+  Patterns 0-4:   System/blank tiles
+  Patterns 5-68:  Icon bar tiles (from iconBarImage1_pattern0.bin)
+  Patterns 69-255: Dashboard tiles (from dashImage_pattern0.bin)
 """
 
 import struct
+import os
+import shutil
 
-# === NES PPU COLOR PALETTE (2C02) ===
-NES_PALETTE = {
-    0x00: (84, 84, 84),    0x01: (0, 30, 116),    0x02: (8, 16, 144),
-    0x03: (48, 0, 136),    0x04: (68, 0, 100),    0x05: (92, 0, 48),
-    0x06: (84, 4, 0),      0x07: (60, 24, 0),     0x08: (32, 42, 0),
-    0x09: (8, 58, 0),      0x0A: (0, 64, 0),      0x0B: (0, 60, 0),
-    0x0C: (0, 50, 60),     0x0D: (0, 0, 0),       0x0E: (0, 0, 0),
-    0x0F: (0, 0, 0),
-    0x10: (152, 150, 152), 0x11: (8, 76, 196),    0x12: (48, 50, 236),
-    0x13: (92, 30, 228),   0x14: (136, 20, 176),  0x15: (160, 20, 100),
-    0x16: (152, 34, 32),   0x17: (120, 60, 0),    0x18: (84, 90, 0),
-    0x19: (40, 114, 0),    0x1A: (8, 124, 0),     0x1B: (0, 118, 40),
-    0x1C: (0, 102, 120),   0x1D: (0, 0, 0),       0x1E: (0, 0, 0),
-    0x1F: (0, 0, 0),
-    0x20: (236, 238, 236), 0x21: (76, 154, 236),  0x22: (120, 124, 236),
-    0x23: (176, 98, 236),  0x24: (228, 84, 236),  0x25: (236, 88, 180),
-    0x26: (236, 106, 100), 0x27: (212, 136, 32),  0x28: (160, 170, 0),
-    0x29: (116, 196, 0),   0x2A: (76, 208, 32),   0x2B: (56, 204, 108),
-    0x2C: (56, 180, 204),  0x2D: (60, 60, 60),    0x2E: (0, 0, 0),
-    0x2F: (0, 0, 0),
-    0x30: (236, 238, 236), 0x31: (168, 204, 236), 0x32: (188, 188, 236),
-    0x33: (212, 178, 236), 0x34: (236, 174, 236), 0x35: (236, 174, 212),
-    0x36: (236, 180, 176), 0x37: (228, 196, 144), 0x38: (204, 210, 120),
-    0x39: (180, 222, 120), 0x3A: (168, 226, 144), 0x3B: (152, 226, 180),
-    0x3C: (160, 214, 228), 0x3D: (160, 162, 160), 0x3E: (0, 0, 0),
-    0x3F: (0, 0, 0),
-}
+NES_SRC = "/tmp/elite-source-code-nes/1-source-files"
 
-# === FIXED BMP PALETTE matching gfx.h GFX_COL_* constants ===
-# Index : gfx.h constant : NES equivalent : RGB
-BMP_PALETTE = [(0, 0, 0)] * 256  # Start all black
-
-# Core game colors (from gfx.h)
-BMP_PALETTE[0]   = (0, 0, 0)         # GFX_COL_BLACK
-BMP_PALETTE[1]   = (152, 34, 32)     # GFX_COL_RED_3 (NES $16)
-BMP_PALETTE[2]   = (8, 124, 0)       # GFX_COL_GREEN_1 (NES $1A)
-BMP_PALETTE[4]   = (0, 0, 180)       # GFX_COL_BLUE_4
-BMP_PALETTE[11]  = (0, 102, 120)     # GFX_COL_CYAN (NES $1C)
-BMP_PALETTE[17]  = (0, 180, 0)       # GFX_COL_GREEN_2
-BMP_PALETTE[28]  = (152, 34, 32)     # GFX_COL_DARK_RED (NES $16)
-BMP_PALETTE[37]  = (160, 170, 0)     # GFX_COL_YELLOW_1 (NES $28)
-BMP_PALETTE[39]  = (212, 136, 32)    # GFX_COL_GOLD (NES $27)
-BMP_PALETTE[45]  = (0, 50, 200)      # GFX_COL_BLUE_1
-BMP_PALETTE[46]  = (0, 30, 170)      # GFX_COL_BLUE_2
-BMP_PALETTE[49]  = (255, 0, 0)       # GFX_COL_RED
-BMP_PALETTE[71]  = (200, 50, 50)     # GFX_COL_RED_4
-BMP_PALETTE[86]  = (0, 100, 0)       # GFX_COL_GREEN_3
-BMP_PALETTE[89]  = (200, 200, 0)     # GFX_COL_YELLOW_3
-BMP_PALETTE[133] = (0, 0, 140)       # GFX_COL_BLUE_3
-BMP_PALETTE[160] = (180, 180, 0)     # GFX_COL_YELLOW_4
-BMP_PALETTE[183] = (200, 100, 150)   # GFX_COL_PINK_1
-BMP_PALETTE[234] = (84, 84, 84)      # GFX_COL_GREY_3 (NES $00 dark grey)
-BMP_PALETTE[235] = (130, 130, 130)   # GFX_COL_GREY_2
-BMP_PALETTE[237] = (150, 150, 150)   # GFX_COL_GREY_4
-BMP_PALETTE[242] = (220, 220, 220)   # GFX_COL_WHITE_2
-BMP_PALETTE[248] = (152, 150, 152)   # GFX_COL_GREY_1 (NES $10 grey)
-BMP_PALETTE[251] = (230, 230, 100)   # GFX_COL_YELLOW_5
-BMP_PALETTE[255] = (236, 238, 236)   # GFX_COL_WHITE (NES $20)
-
-# Map NES PPU colors to BMP palette indices for dashboard rendering
-NES_TO_BMP = {
-    0x0F: 0,    # Black -> GFX_COL_BLACK
-    0x0D: 0,    # Black -> GFX_COL_BLACK
-    0x10: 248,  # Grey -> GFX_COL_GREY_1
-    0x00: 234,  # Dark grey -> GFX_COL_GREY_3
-    0x1C: 11,   # Dark cyan -> GFX_COL_CYAN
-    0x16: 28,   # Dark red -> GFX_COL_DARK_RED
-    0x1A: 2,    # Green -> GFX_COL_GREEN_1
-    0x28: 37,   # Yellow -> GFX_COL_YELLOW_1
-    0x2C: 45,   # Light blue -> GFX_COL_BLUE_1 (approximate)
-    0x20: 255,  # White -> GFX_COL_WHITE
-}
-
-# === NES PALETTE DATA (space view = palette set 0) ===
-bg_palettes = [
-    [0x0F, 0x2C, 0x0F, 0x2C],  # BG 0: space/text
-    [0x0F, 0x28, 0x00, 0x1A],  # BG 1: gauges (yellow, dark grey, GREEN)
-    [0x0F, 0x10, 0x00, 0x16],  # BG 2: scanner (grey, dark grey, dark RED)
-    [0x0F, 0x10, 0x00, 0x1C],  # BG 3: frame (grey, dark grey, dark CYAN)
+# ---------- NES standard NTSC color palette ----------
+NES_PALETTE = [
+    (84,84,84),    (0,30,116),    (8,16,144),    (48,0,136),
+    (68,0,100),    (92,0,48),     (84,4,0),      (60,24,0),
+    (32,42,0),     (8,58,0),      (0,64,0),      (0,60,0),
+    (0,50,60),     (0,0,0),       (0,0,0),        (0,0,0),
+    (152,150,152), (8,76,196),    (48,50,236),   (92,30,228),
+    (136,20,176),  (160,20,100),  (152,34,32),   (120,60,0),
+    (84,90,0),     (40,114,0),    (8,124,0),     (0,118,40),
+    (0,102,120),   (0,0,0),       (0,0,0),        (0,0,0),
+    (236,238,236), (76,154,236),  (120,124,236), (176,98,236),
+    (228,84,236),  (236,88,180),  (236,106,100), (212,136,32),
+    (160,170,0),   (116,196,0),   (76,208,32),   (56,204,108),
+    (56,180,204),  (60,60,60),    (0,0,0),        (0,0,0),
+    (236,238,236), (168,204,236), (188,188,236), (212,178,236),
+    (236,174,236), (236,174,212), (236,180,176), (228,196,144),
+    (204,210,120), (180,222,120), (168,226,144), (152,226,180),
+    (160,214,228), (160,162,160), (0,0,0),        (0,0,0),
 ]
 
-# === DASHBOARD NAMETABLE (dashNames) - 7 rows x 32 cols (rows 22-28) ===
-dashNames = [
+# ---------- NES color code to BMP palette index mapping ----------
+# Maps each NES color code used in the space view to a GFX_COL_xxx
+# palette index, so tile colors match the C code's expectations.
+NES_TO_BMP = {
+    0x0F: 0,    # black          → GFX_COL_BLACK
+    0x1A: 2,    # dark green     → GFX_COL_GREEN_1 (gauge fill!)
+    0x16: 28,   # dark red       → GFX_COL_DARK_RED
+    0x10: 235,  # grey           → GFX_COL_GREY_2
+    0x00: 234,  # dark grey      → GFX_COL_GREY_3
+    0x2C: 11,   # light blue     → GFX_COL_CYAN
+    0x28: 37,   # yellow-green   → GFX_COL_YELLOW_1
+    0x1C: 17,   # dark cyan      → GFX_COL_GREEN_2
+}
+
+# ---------- viewPalettes set 0 (space view) ----------
+VIEW_PALETTES_0 = [
+    [0x0F, 0x2C, 0x0F, 0x2C],  # BG 0
+    [0x0F, 0x28, 0x00, 0x1A],  # BG 1
+    [0x0F, 0x10, 0x00, 0x16],  # BG 2
+    [0x0F, 0x10, 0x00, 0x1C],  # BG 3
+]
+
+# Pre-compute: for each (palette_num, color_idx), what BMP palette index?
+PAL_TO_BMP = {}
+for pal in range(4):
+    for col in range(4):
+        nes_code = VIEW_PALETTES_0[pal][col]
+        PAL_TO_BMP[(pal, col)] = NES_TO_BMP[nes_code]
+
+# ---------- barNames1 (flight icon bar) ----------
+BAR_NAMES_1 = [
+    0x09, 0x0B, 0x0C, 0x06, 0x0D, 0x0E, 0x0F, 0x10,
+    0x06, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+    0x18, 0x19, 0x1A, 0x1B, 0x08, 0x1C, 0x1D, 0x06,
+    0x1E, 0x1F, 0x20, 0x21, 0x06, 0x22, 0x23, 0x0A,
+    0x28, 0x2A, 0x2B, 0x26, 0x2C, 0x2D, 0x2E, 0x2F,
+    0x26, 0x30, 0x31, 0x32, 0x33, 0x26, 0x34, 0x35,
+    0x36, 0x37, 0x26, 0x38, 0x39, 0x3A, 0x3B, 0x26,
+    0x3C, 0x3D, 0x3E, 0x3F, 0x26, 0x40, 0x27, 0x29,
+]
+
+# ---------- dashNames (dashboard rows 22-28) ----------
+DASH_NAMES = [
     0x45, 0x46, 0x47, 0x48, 0x47, 0x49, 0x4A, 0x4B,
     0x4C, 0x4D, 0x4E, 0x4F, 0x4D, 0x4C, 0x4D, 0x4E,
     0x4F, 0x4D, 0x4C, 0x4D, 0x50, 0x4F, 0x4D, 0x4C,
@@ -131,20 +111,8 @@ dashNames = [
     0x00, 0xCA, 0x97, 0x55, 0x55, 0x55, 0x55, 0x98,
 ]
 
-# === ICON BAR NAMETABLE (barNames1 = Flight mode) ===
-barNames1 = [
-    0x09, 0x0B, 0x0C, 0x06, 0x0D, 0x0E, 0x0F, 0x10,
-    0x06, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-    0x18, 0x19, 0x1A, 0x1B, 0x08, 0x1C, 0x1D, 0x06,
-    0x1E, 0x1F, 0x20, 0x21, 0x06, 0x22, 0x23, 0x0A,
-    0x28, 0x2A, 0x2B, 0x26, 0x2C, 0x2D, 0x2E, 0x2F,
-    0x26, 0x30, 0x31, 0x32, 0x33, 0x26, 0x34, 0x35,
-    0x36, 0x37, 0x26, 0x38, 0x39, 0x3A, 0x3B, 0x26,
-    0x3C, 0x3D, 0x3E, 0x3F, 0x26, 0x40, 0x27, 0x29,
-]
-
-# === ATTRIBUTE TABLE (viewAttributes0) ===
-viewAttributes0 = [
+# ---------- viewAttributes0 (8x8 unpacked) ----------
+VIEW_ATTRS_0 = [
     0x3F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F,
     0x33, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x33, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -156,207 +124,184 @@ viewAttributes0 = [
 ]
 
 
-def get_palette_for_tile(tile_row, tile_col):
-    """Get the BG palette number (0-3) for a tile at nametable position."""
-    attr_row = min(tile_row // 4, 7)
-    attr_col = min(tile_col // 4, 7)
-    attr_byte = viewAttributes0[attr_row * 8 + attr_col]
-    quad_row = (tile_row // 2) & 1
-    quad_col = (tile_col // 2) & 1
-    quadrant = quad_row * 2 + quad_col
-    return (attr_byte >> (quadrant * 2)) & 0x03
-
-
-def decode_nes_tile(tile_data):
-    """Decode 16-byte NES 2bpp tile into 8x8 palette index array."""
-    pixels = [[0] * 8 for _ in range(8)]
+def decode_nes_tile(data_16bytes):
+    """Decode 16-byte NES 2bpp tile into 8x8 of color indices (0-3)."""
+    pixels = [[0]*8 for _ in range(8)]
     for row in range(8):
-        lo = tile_data[row]
-        hi = tile_data[row + 8]
+        p0 = data_16bytes[row]
+        p1 = data_16bytes[row + 8]
         for col in range(8):
-            bit = 7 - col
-            pixels[row][col] = ((lo >> bit) & 1) | (((hi >> bit) & 1) << 1)
+            bit0 = (p0 >> (7 - col)) & 1
+            bit1 = (p1 >> (7 - col)) & 1
+            pixels[row][col] = bit0 | (bit1 << 1)
     return pixels
 
 
-def load_tiles(filepath):
-    with open(filepath, 'rb') as f:
-        data = f.read()
-    tiles = {}
-    for i in range(len(data) // 16):
-        tiles[i] = decode_nes_tile(data[i * 16:(i + 1) * 16])
-    return tiles
+def get_palette_for_tile(tile_row, tile_col):
+    """Get BG palette number (0-3) for NES nametable position."""
+    attr_row = tile_row // 4
+    attr_col = tile_col // 4
+    attr_byte = VIEW_ATTRS_0[attr_row * 8 + attr_col]
+    sub_row = (tile_row % 4) // 2
+    sub_col = (tile_col % 4) // 2
+    shift = (sub_row * 2 + sub_col) * 2
+    return (attr_byte >> shift) & 0x03
 
 
-def make_blank_tile():
-    return [[0] * 8 for _ in range(8)]
+def build_full_palette():
+    """Build 256-entry RGB palette compatible with GFX_COL_xxx indices.
+
+    Sets correct RGB values at ALL indices used by both NES tiles
+    and the C drawing code.
+    """
+    pal = [(0, 0, 0)] * 256
+
+    # Set NES-mapped colors at their GFX_COL indices
+    for nes_code, bmp_idx in NES_TO_BMP.items():
+        pal[bmp_idx] = NES_PALETTE[nes_code]
+
+    # Set additional GFX_COL colors needed by the C code
+    pal[255] = (236, 238, 236)   # GFX_COL_WHITE
+    pal[49]  = (236, 106, 100)   # GFX_COL_RED ($26 approx)
+    pal[39]  = (212, 136, 32)    # GFX_COL_GOLD ($27)
+    pal[1]   = (160, 20, 100)    # GFX_COL_RED_3 ($15)
+    pal[4]   = (8, 76, 196)      # GFX_COL_BLUE_4 ($11)
+    pal[45]  = (76, 154, 236)    # GFX_COL_BLUE_1 ($21)
+    pal[46]  = (120, 124, 236)   # GFX_COL_BLUE_2 ($22)
+    pal[133] = (48, 50, 236)     # GFX_COL_BLUE_3 ($12)
+    pal[71]  = (152, 34, 32)     # GFX_COL_RED_4 ($16)
+    pal[242] = (236, 238, 236)   # GFX_COL_WHITE_2
+    pal[248] = (84, 84, 84)      # GFX_COL_GREY_1 (dark grey $00)
+    pal[237] = (120, 120, 120)   # GFX_COL_GREY_4
+    pal[86]  = (0, 64, 0)        # GFX_COL_GREEN_3 ($0A)
+    pal[183] = (236, 88, 180)    # GFX_COL_PINK_1 ($25)
+    pal[89]  = (204, 210, 120)   # GFX_COL_YELLOW_3 ($38)
+    pal[160] = (228, 196, 144)   # GFX_COL_YELLOW_4 ($37)
+    pal[251] = (180, 222, 120)   # GFX_COL_YELLOW_5 ($39)
+    pal[76]  = (212, 136, 32)    # GFX_ORANGE_1
+    pal[77]  = (236, 106, 100)   # GFX_ORANGE_2
+    pal[122] = (160, 170, 0)     # GFX_ORANGE_3
+
+    return pal
 
 
-def nes_color_to_bmp_index(nes_color):
-    """Map NES PPU color to BMP palette index."""
-    if nes_color in NES_TO_BMP:
-        return NES_TO_BMP[nes_color]
-    # Fallback: find closest or use a spare index
-    print("WARNING: unmapped NES color 0x%02X" % nes_color)
-    return 0
-
-
-def render_dashboard():
-    """Render dashboard as 512x160 indexed pixel array using BMP palette indices."""
-    # Load tile data
-    dash_tile_bin = load_tiles(
-        '/tmp/elite-source-code-nes/1-source-files/images/other-images/binaries/dashImage_pattern0.bin'
-    )
-    icon_tile_bin = load_tiles(
-        '/tmp/elite-source-code-nes/1-source-files/images/other-images/binaries/iconBarImage0_pattern0.bin'
-    )
-
-    DASH_TILE_BASE = 0x45
-    dash_tiles = {}
-    for i, pixels in dash_tile_bin.items():
-        dash_tiles[DASH_TILE_BASE + i] = pixels
-    dash_tiles[0x00] = make_blank_tile()
-
-    icon_tiles = dict(icon_tile_bin)
-
-    NES_W = 256
-    NES_H = 80
-    # Store as BMP palette indices (not RGB)
-    img = [[0] * NES_W for _ in range(NES_H)]
-
-    def render_tile(tile_pixels, pal, bmp_y_base, screen_x):
-        for py in range(8):
-            for px in range(8):
-                color_idx = tile_pixels[py][px]
-                if color_idx == 0:
-                    bmp_idx = 0  # Background = black
-                else:
-                    nes_color = pal[color_idx]
-                    bmp_idx = nes_color_to_bmp_index(nes_color)
-                bmp_x = screen_x + px
-                bmp_y = bmp_y_base + py
-                if 0 <= bmp_x < NES_W and 0 <= bmp_y < NES_H:
-                    img[bmp_y][bmp_x] = bmp_idx
-
-    # --- Icon Bar (rows 20-21) ---
-    for row in range(2):
-        for col in range(32):
-            tile_idx = barNames1[row * 32 + col]
-            nes_tile_row = 20 + row
-            screen_col = (col - 1) % 32
-            screen_x = screen_col * 8
-            pal_num = get_palette_for_tile(nes_tile_row, col)
-            pal = bg_palettes[pal_num]
-            tile_pixels = icon_tiles.get(tile_idx, make_blank_tile())
-            render_tile(tile_pixels, pal, row * 8, screen_x)
-
-    # --- Dashboard (rows 22-28) ---
-    # Build nametable buffer with scroll compensation (matches DrawDashNames)
-    namebuf = [0] * (32 * 32)
-    for y in range(7 * 32, 0, -1):
-        namebuf[22 * 32 + y] = dashNames[y - 1]
-
-    # Column 0 wrap-around fixes
-    namebuf[22 * 32] = namebuf[23 * 32]
-    namebuf[23 * 32] = namebuf[24 * 32]
-    namebuf[24 * 32] = namebuf[25 * 32]
-    namebuf[25 * 32] = namebuf[26 * 32]
-    # Row 26 col 0 intentionally not fixed (NES source quirk)
-    namebuf[27 * 32] = namebuf[28 * 32]
-    namebuf[28 * 32] = namebuf[29 * 32]
-    namebuf[29 * 32] = 0x00
-
-    for row_idx in range(7):
-        nes_tile_row = 22 + row_idx
-        for col in range(32):
-            tile_idx = namebuf[nes_tile_row * 32 + col]
-            screen_col = (col - 1) % 32
-            screen_x = screen_col * 8
-            pal_num = get_palette_for_tile(nes_tile_row, col)
-            pal = bg_palettes[pal_num]
-            tile_pixels = dash_tiles.get(tile_idx, make_blank_tile())
-            render_tile(tile_pixels, pal, (2 + row_idx) * 8, screen_x)
-
-    # === Scale 2x to 512x160 ===
-    OUT_W = 512
-    OUT_H = 160
-    img2x = [[0] * OUT_W for _ in range(OUT_H)]
-    for y in range(NES_H):
-        for x in range(NES_W):
-            idx = img[y][x]
-            img2x[y * 2][x * 2] = idx
-            img2x[y * 2][x * 2 + 1] = idx
-            img2x[y * 2 + 1][x * 2] = idx
-            img2x[y * 2 + 1][x * 2 + 1] = idx
-
-    return img2x
-
-
-def write_bmp(filepath, width, height, palette, indexed_pixels):
-    """Write an 8-bit indexed color BMP file."""
-    pal = list(palette)
-    while len(pal) < 256:
-        pal.append((0, 0, 0))
-
+def write_bmp(pixels, width, height, palette, filename):
     row_size = (width + 3) & ~3
     pixel_data_size = row_size * height
     palette_size = 256 * 4
-    offset = 14 + 40 + palette_size
-    file_size = offset + pixel_data_size
+    header_size = 14 + 40
+    file_size = header_size + palette_size + pixel_data_size
 
-    with open(filepath, 'wb') as f:
+    with open(filename, "wb") as f:
         f.write(b'BM')
         f.write(struct.pack('<I', file_size))
         f.write(struct.pack('<HH', 0, 0))
-        f.write(struct.pack('<I', offset))
+        f.write(struct.pack('<I', header_size + palette_size))
         f.write(struct.pack('<I', 40))
         f.write(struct.pack('<i', width))
         f.write(struct.pack('<i', height))
         f.write(struct.pack('<HH', 1, 8))
         f.write(struct.pack('<I', 0))
         f.write(struct.pack('<I', pixel_data_size))
-        f.write(struct.pack('<ii', 2835, 2835))
+        f.write(struct.pack('<i', 2835))
+        f.write(struct.pack('<i', 2835))
         f.write(struct.pack('<I', 256))
         f.write(struct.pack('<I', 0))
-
-        for r, g, b in pal:
+        for r, g, b in palette:
             f.write(struct.pack('BBBB', b, g, r, 0))
-
         for y in range(height - 1, -1, -1):
-            row = indexed_pixels[y]
-            row_bytes = bytes(row)
-            row_bytes += b'\x00' * (row_size - len(row_bytes))
-            f.write(row_bytes)
+            row = bytes(pixels[y])
+            if len(row) < row_size:
+                row += b'\x00' * (row_size - len(row))
+            f.write(row)
 
 
 def main():
-    print("Reconstructing NES Elite dashboard from source data...")
-    print("Using fixed palette matching gfx.h GFX_COL_* constants")
+    dash_bin = os.path.join(NES_SRC, "images/other-images/binaries/dashImage_pattern0.bin")
+    icon_bin = os.path.join(NES_SRC, "images/other-images/binaries/iconBarImage1_pattern0.bin")
 
-    img = render_dashboard()
-    print("Image size: %dx%d pixels" % (len(img[0]), len(img)))
+    with open(dash_bin, "rb") as f:
+        dash_data = f.read()
+    with open(icon_bin, "rb") as f:
+        icon_data = f.read()
 
-    # Count unique palette indices used
-    used = set()
-    for row in img:
-        for idx in row:
-            used.add(idx)
-    print("Palette indices used: %s" % sorted(used))
+    print(f"Dashboard tiles: {len(dash_data)//16} ({len(dash_data)} bytes)")
+    print(f"Icon bar tiles: {len(icon_data)//16} ({len(icon_data)} bytes)")
 
-    for path in ['/home/user/newkind-64/scanner.bmp',
-                 '/home/user/newkind-64/filesystem/scanner.bmp']:
-        write_bmp(path, 512, 160, BMP_PALETTE, img)
-        print("Written: %s" % path)
+    # Build pattern table (256 entries, each 8x8 of 2-bit color indices)
+    patterns = [[[0]*8 for _ in range(8)] for _ in range(256)]
 
-    print("\nPalette index mapping:")
-    print("  0   = black (background)")
-    print("  2   = green  (GFX_COL_GREEN_1, NES $1A) - gauge fill")
-    print("  11  = cyan   (GFX_COL_CYAN, NES $1C)    - frame color 3")
-    print("  28  = dk red (GFX_COL_DARK_RED, NES $16) - scanner color 3")
-    print("  37  = yellow (GFX_COL_YELLOW_1, NES $28) - gauge label")
-    print("  234 = dk grey(GFX_COL_GREY_3, NES $00)   - gauge border")
-    print("  248 = grey   (GFX_COL_GREY_1, NES $10)   - frame color 1")
+    # Icon bar tiles at pattern indices 5-68
+    for i in range(len(icon_data) // 16):
+        idx = 5 + i
+        if idx < 256:
+            patterns[idx] = decode_nes_tile(icon_data[i*16:(i+1)*16])
+
+    # Dashboard tiles at pattern indices 69-255
+    for i in range(len(dash_data) // 16):
+        idx = 69 + i
+        if idx < 256:
+            patterns[idx] = decode_nes_tile(dash_data[i*16:(i+1)*16])
+
+    # Build screen nametable (10 rows x 32 cols)
+    nametable = [[0]*32 for _ in range(10)]
+    for col in range(32):
+        nametable[0][col] = BAR_NAMES_1[col]
+        nametable[1][col] = BAR_NAMES_1[32 + col]
+    for row in range(7):
+        for col in range(32):
+            nametable[2 + row][col] = DASH_NAMES[row * 32 + col]
+
+    # Render NES pixels (256 x 80) using GFX_COL-compatible palette indices
+    nes_w, nes_h = 256, 80
+    nes_pixels = [[0]*nes_w for _ in range(nes_h)]
+
+    for tile_row_local in range(10):
+        tile_row_global = 20 + tile_row_local
+        for tile_col in range(32):
+            tile_idx = nametable[tile_row_local][tile_col]
+            tile_pixels = patterns[tile_idx]
+            palette_num = get_palette_for_tile(tile_row_global, tile_col)
+
+            for py in range(8):
+                for px in range(8):
+                    color_idx = tile_pixels[py][px]
+                    bmp_idx = PAL_TO_BMP[(palette_num, color_idx)]
+                    sx = tile_col * 8 + px
+                    sy = tile_row_local * 8 + py
+                    if sx < nes_w and sy < nes_h:
+                        nes_pixels[sy][sx] = bmp_idx
+
+    # Scale 2x → 512 x 160
+    out_w, out_h = 512, 160
+    out_pixels = [[0]*out_w for _ in range(out_h)]
+    for y in range(nes_h):
+        for x in range(nes_w):
+            val = nes_pixels[y][x]
+            out_pixels[y*2][x*2] = val
+            out_pixels[y*2][x*2+1] = val
+            out_pixels[y*2+1][x*2] = val
+            out_pixels[y*2+1][x*2+1] = val
+
+    palette = build_full_palette()
+    write_bmp(out_pixels, out_w, out_h, palette, "scanner.bmp")
+    print(f"Wrote scanner.bmp ({out_w}x{out_h})")
+
+    shutil.copy("scanner.bmp", "filesystem/scanner.bmp")
+    print("Copied to filesystem/scanner.bmp")
+
+    # Print color mapping for verification
+    print("\nNES color → BMP palette index mapping:")
+    for nes_code, bmp_idx in sorted(NES_TO_BMP.items()):
+        r, g, b = NES_PALETTE[nes_code]
+        print(f"  NES ${nes_code:02X} ({r:3d},{g:3d},{b:3d}) → BMP index {bmp_idx:3d}")
+
+    print("\nPalette→BMP tile color mapping:")
+    for pal in range(4):
+        codes = VIEW_PALETTES_0[pal]
+        indices = [PAL_TO_BMP[(pal, c)] for c in range(4)]
+        print(f"  BG{pal}: NES ${codes[0]:02X},${codes[1]:02X},${codes[2]:02X},${codes[3]:02X} → BMP {indices}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
