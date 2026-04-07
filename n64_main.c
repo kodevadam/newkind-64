@@ -1330,13 +1330,17 @@ void load_commander_screen(void)
 	restore_saved_commander();
 	set_commander_name("JAMESON");
 	saved_cmdr = cmdr;
-	update_console();
+	/* Don't call update_console() here - it draws the scanner BMP
+	 * which would leak into the intro screen. */
 }
 
 
 void run_first_intro_screen(void)
 {
 	current_screen = SCR_INTRO_ONE;
+
+	/* Clear scanner area so dashboard doesn't leak into intro screen */
+	fast_clear_region(0, SCANNER_Y, N64_SCREEN_W - 1, N64_SCREEN_H - 1);
 
 	snd_play_midi(SND_ELITE_THEME, 1);
 
@@ -1722,20 +1726,12 @@ int main(void)
 
 				if ((cross_x != old_cross_x) || (cross_y != old_cross_y))
 				{
-					if (old_cross_x != -1)
-					{
-						/* Erase old cross by drawing black */
-						int half = (current_screen == SCR_GALACTIC_CHART) ? 8 : 16;
-						int clip_b = (current_screen == SCR_GALACTIC_CHART) ? 293 : 339;
-						gfx_set_clip_region(1, 37, 510, clip_b);
-						gfx_draw_colour_line(old_cross_x - half, old_cross_y, old_cross_x + half, old_cross_y, GFX_COL_BLACK);
-						gfx_draw_colour_line(old_cross_x, old_cross_y - half, old_cross_x, old_cross_y + half, GFX_COL_BLACK);
-						gfx_set_clip_region(1, 1, 510, GFX_VIEW_BY);
-					}
+					/* No need to erase old cross - framebuffer is cleared
+					 * each frame and the chart is redrawn fresh. */
 					old_cross_x = cross_x;
 					old_cross_y = cross_y;
-					draw_cross(old_cross_x, old_cross_y);
 				}
+				draw_cross(cross_x, cross_y);
 			}
 		}
 

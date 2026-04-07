@@ -82,10 +82,12 @@ void update_intro1 (void)
 		universe[0].location.z = 384;
 
 	gfx_clear_display();
+	/* Also clear below GFX_VIEW_BY where intro text is drawn (Y=310-360) */
+	gfx_clear_area(0, GFX_VIEW_BY + 1, 511, SCANNER_Y - 1);
 
 	flight_roll = 1;
 	update_universe();
-	
+
 	gfx_draw_sprite(IMG_ELITE_TXT, -1, 10);
 
 	gfx_display_centre_text (310, "Original Game (C) I.Bell & D.Braben.", 120, GFX_COL_WHITE);
@@ -150,6 +152,7 @@ void update_intro2 (void)
 
 
 	gfx_clear_display();
+	gfx_clear_area(0, GFX_VIEW_BY + 1, 511, SCANNER_Y - 1);
 	update_starfield();
 	update_universe();
 

@@ -901,24 +901,50 @@ void display_energy (void)
 
 
 
+/*
+ * Draw the NES-style I-bar indicator at (cx, cy).
+ * NES pattern 203: a small I-shape, 6x4 pixels, sprite palette 3 color 3 = pink.
+ * At 2x scale: 12x8 pixels.
+ */
+static void draw_ibar(int cx, int cy)
+{
+	/* I-bar: top bar (3 wide), vertical (1 wide), bottom bar (3 wide)
+	 * NES pattern 203 at 2x:
+	 *   Row 0-1: blank
+	 *   Row 2-3: ..XXX... (3 pixels at cols 2-4)
+	 *   Row 4-5: ...X.... (1 pixel at col 3)
+	 *   Row 6-7: ..XXX... (3 pixels at cols 2-4)
+	 */
+	int c = GFX_COL_PINK_1;
+	/* Top bar */
+	gfx_draw_colour_line(cx - 4, cy,     cx + 4, cy,     c);
+	gfx_draw_colour_line(cx - 4, cy + 1, cx + 4, cy + 1, c);
+	/* Vertical */
+	gfx_draw_colour_line(cx, cy + 2, cx, cy + 5, c);
+	gfx_draw_colour_line(cx + 1, cy + 2, cx + 1, cy + 5, c);
+	/* Bottom bar */
+	gfx_draw_colour_line(cx - 4, cy + 6, cx + 4, cy + 6, c);
+	gfx_draw_colour_line(cx - 4, cy + 7, cx + 4, cy + 7, c);
+}
+
+
 void display_flight_roll (void)
 {
-	int sx,sy;
-	int i;
-	int pos;
-
-	/* NES dashboard: roll/climb are not displayed as separate bars.
-	 * On NES they use the compass area. Stub these for now. */
-	(void)sx; (void)sy; (void)pos; (void)i;
+	/* NES sprite 11: pattern 203, y=199 (NES pixel), x=228 center ±15.
+	 * At 2x relative to SCANNER_Y: y = (199-160)*2 = 78, x center = 228*2 = 456.
+	 * flight_roll ranges -31..+31, map to ±30 pixel offset. */
+	int cx = 456 + (flight_roll * 30 / 31);
+	int cy = SCANNER_Y + 78;
+	draw_ibar(cx, cy);
 }
 
 void display_flight_climb (void)
 {
-	int sx,sy;
-	int i;
-	int pos;
-
-	(void)sx; (void)sy; (void)pos; (void)i;
+	/* NES sprite 12: pattern 203, y=207 (NES pixel), x=228 center ±15.
+	 * At 2x relative to SCANNER_Y: y = (207-160)*2 = 94. */
+	int cx = 456 + (flight_climb * 30 / 31);
+	int cy = SCANNER_Y + 94;
+	draw_ibar(cx, cy);
 }
 
 
@@ -933,30 +959,30 @@ void display_fuel (void)
 void display_missiles (void)
 {
 	int nomiss;
-	int x,y;
+	int i, img;
+
+	/* NES missiles in a 2x2 tile grid at cols 30-31, rows 23-24.
+	 * At 2x: x = 464,480; y = 48,64 relative to SCANNER_Y.
+	 * Missile 4=top-left, 3=top-right, 2=bottom-left, 1=bottom-right.
+	 * Sprites are 12x10, centered in 16x16 tile slots (+2,+3). */
+	static const int mx[4] = { 466, 482, 466, 482 };
+	static const int my[4] = {  51,  51,  67,  67 };
 
 	if (cmdr.missiles == 0)
 		return;
-	
+
 	nomiss = cmdr.missiles > 4 ? 4 : cmdr.missiles;
 
-	/* NES missiles at rows 23-24, cols 30-31 (right side of dashboard)
-	 * After scroll: screen cols 29-30 = x 464,480 at 2x. y = 48-64 at 2x. */
-	x = (4 - nomiss) * 14 + 438;
-	y = 56 + SCANNER_Y;
-	
-	if (missile_target != MISSILE_UNARMED)
+	for (i = 0; i < nomiss; i++)
 	{
-		gfx_draw_sprite ((missile_target < 0) ? IMG_MISSILE_YELLOW :
-											    IMG_MISSILE_RED, x, y);
-		x += 16;
-		nomiss--;
-	}
-
-	for (; nomiss > 0; nomiss--)
-	{
-		gfx_draw_sprite (IMG_MISSILE_GREEN, x, y);
-		x += 16;
+		/* Missile numbering: slot 0=top-left (missile 4), slot 3=bottom-right (missile 1).
+		 * Draw from slot (4-nomiss) to slot 3. Active missile is the last one. */
+		int slot = 4 - nomiss + i;
+		if (i == 0 && missile_target != MISSILE_UNARMED)
+			img = (missile_target < 0) ? IMG_MISSILE_YELLOW : IMG_MISSILE_RED;
+		else
+			img = IMG_MISSILE_GREEN;
+		gfx_draw_sprite(img, mx[slot], my[slot] + SCANNER_Y);
 	}
 }
 
