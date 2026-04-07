@@ -998,10 +998,34 @@ void display_condition(void)
   gfx_draw_filled_circle(condition_x, condition_y, condition_r, c);
 }
 
+/*
+ * Draw icon bar cursor highlight.
+ * NES uses bracket sprites around the selected icon.
+ * We draw a small triangle pointer below the icon bar.
+ */
+static void draw_icon_bar_cursor(void)
+{
+	extern int icon_bar_cursor;
+	/* Icon bar is 32 NES tiles wide = 512 pixels at 2x.
+	 * 12 icon slots, each ~2.6 tiles wide. NES uses 5*xIconBarPointer + 6.
+	 * At 2x: icon_x = (5 * (icon_bar_cursor * 4) + 6) * 2 = icon_bar_cursor * 40 + 12.
+	 * Each icon is about 40 pixels wide at 2x. */
+	int x = icon_bar_cursor * 40 + 28;  /* Center of icon slot at 2x */
+	int y = SCANNER_Y + 30;  /* Just below icon bar (icon bar is 32px tall at 2x) */
+
+	/* Draw small downward-pointing triangle */
+	gfx_draw_colour_line(x - 4, y, x + 4, y, GFX_COL_WHITE);
+	gfx_draw_colour_line(x - 3, y + 1, x + 3, y + 1, GFX_COL_WHITE);
+	gfx_draw_colour_line(x - 2, y + 2, x + 2, y + 2, GFX_COL_WHITE);
+	gfx_draw_colour_line(x - 1, y + 3, x + 1, y + 3, GFX_COL_WHITE);
+}
+
+
 void update_console (void)
 {
 	gfx_set_clip_region (0, 0, 512, 512);
 	gfx_draw_scanner();
+	draw_icon_bar_cursor();
 
 	display_speed();
 	display_flight_climb();

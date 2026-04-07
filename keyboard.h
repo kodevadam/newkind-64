@@ -61,6 +61,21 @@ extern int kbd_backspace_pressed;
 extern int kbd_space_pressed;
 extern char old_key[];
 
+/* Analog flight control */
+extern int joy_roll;        /* -127..+127, positive = roll right */
+extern int joy_pitch;       /* -127..+127, positive = pitch down */
+
+/* Icon bar navigation */
+extern int kbd_icon_left_pressed;
+extern int kbd_icon_right_pressed;
+extern int kbd_icon_activate_pressed;
+
+/* Digital flight from C-buttons (strafing) */
+extern int kbd_climb_pressed;
+extern int kbd_dive_pressed;
+extern int kbd_roll_left_pressed;
+extern int kbd_roll_right_pressed;
+
 
 int kbd_keyboard_startup (void);
 int kbd_keyboard_shutdown (void);

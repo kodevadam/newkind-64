@@ -66,6 +66,29 @@ int find_input;
 char find_name[20];
 
 /*
+ * NES-style icon bar state.
+ * The icon bar cursor tracks which icon slot (0-11) is selected.
+ * D-pad Left/Right moves it, B activates the selected function.
+ *
+ * Icon bar type determines which functions are available:
+ *   0 = Docked, 1 = Flight, 2 = Charts
+ */
+int icon_bar_cursor = 4;    /* Start at center icon */
+int icon_bar_type = 1;      /* 0=docked, 1=flight, 2=charts */
+
+/* NES icon bar function numbers for each type (from NES TT102 dispatch) */
+/* 0 = no function */
+static const int icon_funcs_docked[12] = {
+	1, 2, 3, 4, 5, 6, 0, 35, 8, 0, 0, 12
+};
+static const int icon_funcs_flight[12] = {
+	17, 2, 3, 4, 21, 22, 23, 24, 25, 26, 27, 12
+};
+static const int icon_funcs_charts[12] = {
+	1, 2, 36, 35, 21, 38, 39, 22, 41, 23, 27, 12
+};
+
+/*
  * N64 Pause Menu - shown when Start is pressed during gameplay.
  * Provides access to all game screens and functions.
  */
@@ -418,6 +441,186 @@ void draw_laser_sights(void)
 		gfx_draw_colour_line(x1, y1+1, x2, y1+1, GFX_COL_GREY_1);
 	}
 }
+
+/* Forward declarations for flight maneuver functions */
+static void roll_left(void);
+static void roll_right(void);
+static void climb(void);
+static void dive(void);
+
+/*
+ * NES-style icon bar: process navigation and activation.
+ * Called every frame from handle_flight_keys.
+ */
+static void process_icon_bar(void)
+{
+	const int *funcs;
+	int func;
+
+	/* Navigate icon bar cursor */
+	if (kbd_icon_left_pressed)
+	{
+		icon_bar_cursor--;
+		if (icon_bar_cursor < 0) icon_bar_cursor = 11;
+	}
+	if (kbd_icon_right_pressed)
+	{
+		icon_bar_cursor++;
+		if (icon_bar_cursor > 11) icon_bar_cursor = 0;
+	}
+
+	/* Activate selected icon */
+	if (!kbd_icon_activate_pressed)
+		return;
+
+	/* Select function table based on context */
+	if (docked)
+		funcs = icon_funcs_docked;
+	else if (current_screen == SCR_GALACTIC_CHART || current_screen == SCR_SHORT_RANGE)
+		funcs = icon_funcs_charts;
+	else
+		funcs = icon_funcs_flight;
+
+	func = funcs[icon_bar_cursor];
+	if (func == 0)
+		return;
+
+	/* NES TT102 dispatch - map function numbers to game actions */
+	switch (func)
+	{
+		case 1:  /* Launch */
+			kbd_F1_pressed = 1;
+			break;
+		case 2:  /* Market Prices */
+			kbd_F8_pressed = 1;
+			break;
+		case 3:  /* Commander Status */
+			kbd_F9_pressed = 1;
+			break;
+		case 4:  /* Charts (toggle long/short) */
+			kbd_F5_pressed = 1;
+			break;
+		case 5:  /* Equip Ship */
+			kbd_F4_pressed = 1;
+			break;
+		case 6:  /* Save/Load */
+			if (docked)
+			{
+				extern void save_commander_screen(void);
+				save_commander_screen();
+			}
+			break;
+		case 8:  /* Inventory */
+			kbd_F10_pressed = 1;
+			break;
+		case 12: /* Fast-forward / In-system jump */
+			kbd_jump_pressed = 1;
+			break;
+		case 17: /* Docking Computer */
+			kbd_dock_pressed = 1;
+			break;
+		case 21: /* Front Space View (cycle views) */
+			if (current_screen == SCR_FRONT_VIEW)
+				kbd_F4_pressed = 1;  /* cycle to right view */
+			else if (current_screen == SCR_RIGHT_VIEW)
+				kbd_F2_pressed = 1;  /* cycle to rear */
+			else if (current_screen == SCR_REAR_VIEW)
+				kbd_F3_pressed = 1;  /* cycle to left */
+			else
+				kbd_F1_pressed = 1;  /* go to front */
+			break;
+		case 22: /* Hyperspace */
+			kbd_hyperspace_pressed = 1;
+			break;
+		case 23: /* ECM */
+			kbd_ecm_pressed = 1;
+			break;
+		case 24: /* Target Missile */
+			kbd_target_missile_pressed = 1;
+			break;
+		case 25: /* Fire Missile */
+			kbd_fire_missile_pressed = 1;
+			break;
+		case 26: /* Energy Bomb */
+			kbd_energy_bomb_pressed = 1;
+			kbd_ctrl_pressed = 1;
+			break;
+		case 27: /* Escape Pod */
+			kbd_escape_pressed = 1;
+			kbd_ctrl_pressed = 1;
+			break;
+		case 35: /* Data on System */
+			kbd_F7_pressed = 1;
+			break;
+		case 36: /* Switch Chart Range */
+			if (current_screen == SCR_GALACTIC_CHART)
+				kbd_F6_pressed = 1;
+			else
+				kbd_F5_pressed = 1;
+			break;
+		case 38: /* Return to Current System */
+			kbd_origin_pressed = 1;
+			break;
+		case 39: /* Find System */
+			kbd_find_pressed = 1;
+			break;
+		case 41: /* Galactic Hyperspace */
+			kbd_hyperspace_pressed = 1;
+			kbd_ctrl_pressed = 1;
+			break;
+	}
+}
+
+
+/*
+ * Apply analog joystick to flight roll/climb.
+ * Maps the joystick range to the flight_roll/climb range.
+ */
+static void process_analog_flight(void)
+{
+	if (docked || game_paused)
+		return;
+
+	/* Analog roll from joystick X axis */
+	if (joy_roll != 0)
+	{
+		/* Map joystick range (-127..127) to roll rate */
+		int target = (joy_roll * myship.max_roll) / 127;
+		flight_roll = target;
+		rolling = 1;
+	}
+
+	/* Analog pitch from joystick Y axis */
+	if (joy_pitch != 0)
+	{
+		int target = (joy_pitch * myship.max_climb) / 127;
+		flight_climb = target;
+		climbing = 1;
+	}
+
+	/* Digital pitch/roll from C-buttons (strafing) */
+	if (kbd_climb_pressed)
+	{
+		dive();     /* C-Up = nose down = dive */
+		climbing = 1;
+	}
+	if (kbd_dive_pressed)
+	{
+		climb();    /* C-Down = nose up = climb */
+		climbing = 1;
+	}
+	if (kbd_roll_left_pressed)
+	{
+		roll_left();
+		rolling = 1;
+	}
+	if (kbd_roll_right_pressed)
+	{
+		roll_right();
+		rolling = 1;
+	}
+}
+
 
 static void roll_left(void)
 {
@@ -907,6 +1110,20 @@ void handle_flight_keys(void)
 		run_pause_menu();
 		return;
 	}
+
+	/* Update icon bar type based on context */
+	if (docked)
+		icon_bar_type = 0;
+	else if (current_screen == SCR_GALACTIC_CHART || current_screen == SCR_SHORT_RANGE)
+		icon_bar_type = 2;
+	else
+		icon_bar_type = 1;
+
+	/* NES-style icon bar navigation and activation */
+	process_icon_bar();
+
+	/* Analog joystick + C-button digital flight controls */
+	process_analog_flight();
 
 	if (kbd_F1_pressed)
 	{
