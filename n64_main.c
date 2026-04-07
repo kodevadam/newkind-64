@@ -1340,7 +1340,7 @@ void run_first_intro_screen(void)
 	current_screen = SCR_INTRO_ONE;
 
 	/* Clear scanner area so dashboard doesn't leak into intro screen */
-	fast_clear_region(0, SCANNER_Y, N64_SCREEN_W - 1, N64_SCREEN_H - 1);
+	gfx_clear_area(0, SCANNER_Y, 511, N64_SCREEN_H - 1);
 
 	snd_play_midi(SND_ELITE_THEME, 1);
 
