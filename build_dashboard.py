@@ -32,8 +32,10 @@ NES_PALETTE = [
     (0,102,120),   (0,0,0),       (0,0,0),        (0,0,0),
     (236,238,236), (76,154,236),  (120,124,236), (176,98,236),
     (228,84,236),  (236,88,180),  (236,106,100), (212,136,32),
-    # $28: CRT-accurate olive/drab instead of vivid yellow-green
-    (156,156, 72), (116,196,0),   (76,208,32),   (56,204,108),
+    # $28: matched to palette 3 grey to remove yellow tinge from label tiles.
+    # NES technically renders this as yellow-green but on CRT it appears
+    # closer to grey/olive. Using neutral warm grey for cleaner look.
+    (152,150,140), (116,196,0),   (76,208,32),   (56,204,108),
     (56,180,204),  (60,60,60),    (0,0,0),        (0,0,0),
     (236,238,236), (168,204,236), (188,188,236), (212,178,236),
     (236,174,236), (236,174,212), (236,180,176), (228,196,144),

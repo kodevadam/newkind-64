@@ -935,31 +935,29 @@ static void draw_ibar(int sx, int sy)
 
 void display_flight_roll (void)
 {
-	/* NES sprite 11 (roll): x = 212 + (255-JSTX)/8 - 4, y = 199 (NTSC).
-	 * At 2x: x range 424-486, y = SCANNER_Y + 78.
-	 * NES inverts roll: high JSTX (rolling right) = low x (indicator left).
-	 * Our flight_roll: positive = rolling right, range -31..+31.
-	 * Formula: sprite_x = 455 - flight_roll (inverted, 1:1 scale at 2x).
-	 *   flight_roll = +31 (max right): sprite_x = 424 (leftmost)
-	 *   flight_roll =   0 (centered):  sprite_x = 455
-	 *   flight_roll = -31 (max left):  sprite_x = 486 (rightmost)
+	/* NES sprite 11 (roll): pattern 203 I-bar.
+	 * Roll track in BMP is at y=82-91 (10 pixels tall).
+	 * I-bar visible part is rows sy+2..sy+9 (8 pixels tall).
+	 * To center 8-pixel I-bar in 10-pixel track: sy+2 = 83 → sy = 81.
+	 * Use sy = 82 to push slightly toward bottom of slot for visual clarity.
+	 * NES inverts roll: rolling right (positive) moves indicator LEFT.
+	 * X range 424-486, center 455 (1:1 with flight_roll ±31).
 	 */
 	int sx = 455 - flight_roll;
-	int sy = SCANNER_Y + 78;
+	int sy = SCANNER_Y + 82;
 	draw_ibar(sx, sy);
 }
 
 void display_flight_climb (void)
 {
-	/* NES sprite 12 (pitch): x = 212 + JSTY/8 - 4, y = 207 (NTSC).
-	 * At 2x: x range 424-486, y = SCANNER_Y + 94.
-	 * NES: high JSTY (climbing) = high x (indicator right).
-	 * Our flight_climb: positive = climb, range -8..+8 (max_climb=8).
-	 * Scale flight_climb (±8) to match NES x range (±31 at 2x).
-	 * Formula: sprite_x = 455 + flight_climb * 31 / 8
+	/* NES sprite 12 (pitch): pattern 203 I-bar.
+	 * Pitch track at BMP y=98-107 (10 pixels). Center: sy = 97/98.
+	 * Use sy = 98 to match roll bar offset.
+	 * NES: positive climb = nose up = indicator moves right.
+	 * Scale flight_climb ±8 to ±31 pixel range at 2x.
 	 */
 	int sx = 455 + (flight_climb * 31) / 8;
-	int sy = SCANNER_Y + 94;
+	int sy = SCANNER_Y + 98;
 	draw_ibar(sx, sy);
 }
 
