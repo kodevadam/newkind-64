@@ -82,8 +82,10 @@ void update_intro1 (void)
 		universe[0].location.z = 384;
 
 	gfx_clear_display();
-	/* Also clear below GFX_VIEW_BY where intro text is drawn (Y=310-360) */
-	gfx_clear_area(0, GFX_VIEW_BY + 1, 511, SCANNER_Y - 1);
+	/* Clear the full scanner/dashboard area (y=320-479) where intro text
+	 * is drawn (Y=310-360). gfx_clear_display() only clears to GFX_VIEW_BY
+	 * (319), so ship wireframe pixels would persist below that. */
+	gfx_clear_area(0, GFX_VIEW_BY + 1, 511, 479);
 
 	flight_roll = 1;
 	update_universe();
@@ -152,7 +154,7 @@ void update_intro2 (void)
 
 
 	gfx_clear_display();
-	gfx_clear_area(0, GFX_VIEW_BY + 1, 511, SCANNER_Y - 1);
+	gfx_clear_area(0, GFX_VIEW_BY + 1, 511, 479);
 	update_starfield();
 	update_universe();
 
