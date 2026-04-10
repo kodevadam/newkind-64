@@ -575,22 +575,32 @@ static void process_icon_bar(void)
 /*
  * Apply analog joystick to flight roll/climb.
  * Maps the joystick range to the flight_roll/climb range.
+ *
+ * Sign conventions (matching original Elite):
+ *   flight_roll > 0 = rolling left  (roll_left increases it)
+ *   flight_roll < 0 = rolling right (roll_right decreases it)
+ *   flight_climb > 0 = climbing (nose up)
+ *   flight_climb < 0 = diving  (nose down)
+ *
+ * Joystick convention (inverted Y for flight sim feel):
+ *   stick right → roll right → flight_roll NEGATIVE (invert stick_x)
+ *   stick up    → dive       → flight_climb NEGATIVE (invert stick_y)
  */
 static void process_analog_flight(void)
 {
 	if (docked || game_paused)
 		return;
 
-	/* Analog roll from joystick X axis */
+	/* Analog roll: stick right → roll right → negative flight_roll */
 	if (joy_roll != 0)
 	{
-		/* Map joystick range (-127..127) to roll rate */
-		int target = (joy_roll * myship.max_roll) / 127;
+		int target = -(joy_roll * myship.max_roll) / 127;
 		flight_roll = target;
 		rolling = 1;
 	}
 
-	/* Analog pitch from joystick Y axis */
+	/* Analog pitch: stick up → dive → negative flight_climb.
+	 * joy_pitch is already -stick_y, so positive joy_pitch = climb. */
 	if (joy_pitch != 0)
 	{
 		int target = (joy_pitch * myship.max_climb) / 127;
@@ -1927,13 +1937,27 @@ int main(void)
 
 			/* Non-flight screens persist in the framebuf - no per-frame redraw.
 			 * They are drawn once by their display_*() function and stay until
-			 * the next screen transition. */
+			 * the next screen transition.
+			 * EXCEPTION: chart screens need per-frame redraw so the cursor
+			 * doesn't leave trails as it moves. */
 
 			if (do_sim && current_screen == SCR_BREAK_PATTERN)
 				display_break_pattern();
 
-			if (do_sim)
+			if (current_screen == SCR_GALACTIC_CHART ||
+			    current_screen == SCR_SHORT_RANGE)
 			{
+				/* Redraw chart every frame to clear cursor trails.
+				 * Save/restore cross_x/y since display_*_chart() resets
+				 * them to the hyperspace planet position. */
+				int saved_cx = cross_x, saved_cy = cross_y;
+				if (current_screen == SCR_GALACTIC_CHART)
+					display_galactic_chart();
+				else
+					display_short_range_chart();
+				cross_x = saved_cx;
+				cross_y = saved_cy;
+
 				if (cross_timer > 0)
 				{
 					cross_timer--;
@@ -1941,13 +1965,8 @@ int main(void)
 						show_distance_to_planet();
 				}
 
-				if ((cross_x != old_cross_x) || (cross_y != old_cross_y))
-				{
-					/* No need to erase old cross - framebuffer is cleared
-					 * each frame and the chart is redrawn fresh. */
-					old_cross_x = cross_x;
-					old_cross_y = cross_y;
-				}
+				old_cross_x = cross_x;
+				old_cross_y = cross_y;
 				draw_cross(cross_x, cross_y);
 			}
 		}
