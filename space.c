@@ -902,49 +902,65 @@ void display_energy (void)
 
 
 /*
- * Draw the NES-style I-bar indicator at (cx, cy).
- * NES pattern 203: a small I-shape, 6x4 pixels, sprite palette 3 color 3 = pink.
- * At 2x scale: 12x8 pixels.
+ * Draw the NES-style I-bar indicator sprite.
+ * NES pattern 203 (8x8 tile) contains:
+ *   Row 0: blank
+ *   Row 1: ..###... (top bar, 3 pixels cols 2-4)
+ *   Row 2: ...#.... (vertical, 1 pixel col 3)
+ *   Row 3: ...#.... (vertical, 1 pixel col 3)
+ *   Row 4: ..###... (bottom bar, 3 pixels cols 2-4)
+ *   Rows 5-7: blank
+ *
+ * At 2x scale (each NES pixel = 2x2 screen pixels):
+ *   Rows 2-3: top bar, 6 pixels wide at cols 4-9
+ *   Rows 4-7: vertical, 2 pixels wide at cols 6-7
+ *   Rows 8-9: bottom bar, 6 pixels wide at cols 4-9
+ *
+ * (sx, sy) is the top-left corner of the sprite at 2x scale.
  */
-static void draw_ibar(int cx, int cy)
+static void draw_ibar(int sx, int sy)
 {
-	/* I-bar: top bar (3 wide), vertical (1 wide), bottom bar (3 wide)
-	 * NES pattern 203 at 2x:
-	 *   Row 0-1: blank
-	 *   Row 2-3: ..XXX... (3 pixels at cols 2-4)
-	 *   Row 4-5: ...X.... (1 pixel at col 3)
-	 *   Row 6-7: ..XXX... (3 pixels at cols 2-4)
-	 */
 	int c = GFX_COL_PINK_1;
 	/* Top bar */
-	gfx_draw_colour_line(cx - 4, cy,     cx + 4, cy,     c);
-	gfx_draw_colour_line(cx - 4, cy + 1, cx + 4, cy + 1, c);
+	gfx_draw_colour_line(sx + 4, sy + 2, sx + 9, sy + 2, c);
+	gfx_draw_colour_line(sx + 4, sy + 3, sx + 9, sy + 3, c);
 	/* Vertical */
-	gfx_draw_colour_line(cx, cy + 2, cx, cy + 5, c);
-	gfx_draw_colour_line(cx + 1, cy + 2, cx + 1, cy + 5, c);
+	gfx_draw_colour_line(sx + 6, sy + 4, sx + 6, sy + 7, c);
+	gfx_draw_colour_line(sx + 7, sy + 4, sx + 7, sy + 7, c);
 	/* Bottom bar */
-	gfx_draw_colour_line(cx - 4, cy + 6, cx + 4, cy + 6, c);
-	gfx_draw_colour_line(cx - 4, cy + 7, cx + 4, cy + 7, c);
+	gfx_draw_colour_line(sx + 4, sy + 8, sx + 9, sy + 8, c);
+	gfx_draw_colour_line(sx + 4, sy + 9, sx + 9, sy + 9, c);
 }
 
 
 void display_flight_roll (void)
 {
-	/* NES sprite 11: pattern 203, y=199 (NES pixel), x=228 center ±15.
-	 * At 2x relative to SCANNER_Y: y = (199-160)*2 = 78, x center = 228*2 = 456.
-	 * flight_roll ranges -31..+31, map to ±30 pixel offset. */
-	int cx = 456 + (flight_roll * 30 / 31);
-	int cy = SCANNER_Y + 78;
-	draw_ibar(cx, cy);
+	/* NES sprite 11 (roll): x = 212 + (255-JSTX)/8 - 4, y = 199 (NTSC).
+	 * At 2x: x range 424-486, y = SCANNER_Y + 78.
+	 * NES inverts roll: high JSTX (rolling right) = low x (indicator left).
+	 * Our flight_roll: positive = rolling right, range -31..+31.
+	 * Formula: sprite_x = 455 - flight_roll (inverted, 1:1 scale at 2x).
+	 *   flight_roll = +31 (max right): sprite_x = 424 (leftmost)
+	 *   flight_roll =   0 (centered):  sprite_x = 455
+	 *   flight_roll = -31 (max left):  sprite_x = 486 (rightmost)
+	 */
+	int sx = 455 - flight_roll;
+	int sy = SCANNER_Y + 78;
+	draw_ibar(sx, sy);
 }
 
 void display_flight_climb (void)
 {
-	/* NES sprite 12: pattern 203, y=207 (NES pixel), x=228 center ±15.
-	 * At 2x relative to SCANNER_Y: y = (207-160)*2 = 94. */
-	int cx = 456 + (flight_climb * 30 / 31);
-	int cy = SCANNER_Y + 94;
-	draw_ibar(cx, cy);
+	/* NES sprite 12 (pitch): x = 212 + JSTY/8 - 4, y = 207 (NTSC).
+	 * At 2x: x range 424-486, y = SCANNER_Y + 94.
+	 * NES: high JSTY (climbing) = high x (indicator right).
+	 * Our flight_climb: positive = climb, range -8..+8 (max_climb=8).
+	 * Scale flight_climb (±8) to match NES x range (±31 at 2x).
+	 * Formula: sprite_x = 455 + flight_climb * 31 / 8
+	 */
+	int sx = 455 + (flight_climb * 31) / 8;
+	int sy = SCANNER_Y + 94;
+	draw_ibar(sx, sy);
 }
 
 

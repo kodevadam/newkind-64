@@ -18,7 +18,9 @@ import shutil
 
 NES_SRC = "/tmp/elite-source-code-nes/1-source-files"
 
-# ---------- NES standard NTSC color palette ----------
+# ---------- NES NTSC color palette (CRT-accurate values) ----------
+# Using CRT-desaturated values for more authentic TV appearance.
+# $28 in particular is less vivid than typical emulator palettes.
 NES_PALETTE = [
     (84,84,84),    (0,30,116),    (8,16,144),    (48,0,136),
     (68,0,100),    (92,0,48),     (84,4,0),      (60,24,0),
@@ -30,7 +32,8 @@ NES_PALETTE = [
     (0,102,120),   (0,0,0),       (0,0,0),        (0,0,0),
     (236,238,236), (76,154,236),  (120,124,236), (176,98,236),
     (228,84,236),  (236,88,180),  (236,106,100), (212,136,32),
-    (160,170,0),   (116,196,0),   (76,208,32),   (56,204,108),
+    # $28: CRT-accurate olive/drab instead of vivid yellow-green
+    (156,156, 72), (116,196,0),   (76,208,32),   (56,204,108),
     (56,180,204),  (60,60,60),    (0,0,0),        (0,0,0),
     (236,238,236), (168,204,236), (188,188,236), (212,178,236),
     (236,174,236), (236,174,212), (236,180,176), (228,196,144),
